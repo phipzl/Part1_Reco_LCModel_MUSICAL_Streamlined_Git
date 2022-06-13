@@ -1,0 +1,208 @@
+function CorrectionMaps = B1correction()
+plotting = 0; 
+
+tic
+% Debugging
+tmp_dir='/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/plazen/WIP/3DMRSIMAP_things/B1corr/tmp123';
+% run([tmp_dir '/B1corrParameters.m'])
+out_dir='/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/plazen/WIP/3DMRSIMAP_things/B1corr/out123';
+load([out_dir '/Parameters.mat']); % Needed for raw import functionality:
+
+% For now do this:
+% addpath('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/plazen/WIP/3DMRSIMAP_things/B1corr');
+% addpath(genpath('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/plazen/Software/PulseWizard/'));
+addpath(genpath('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Sourcecode/MRSI_Processing_ReleaseVersions/Part2_Registration_Evaluation_v1.x14.23_PLfix/Matlab_Functions/'));
+
+%% Loading pulse (output from PulseWizard) and creating slab 
+
+fprintf('Loading pulse shape...');
+profile = B1correction_CreateExcitationProfile(); % Returns pulse profile and the corresponding frequency scale
+fprintf('%34.2f\n', toc); 
+
+if plotting == 1; plot(profile(:,1),profile(:,2)); pause(1); close all; end
+sliceprofile=profile(:,2);  % Unit: degrees
+sp_scale=profile(:,1);  % Unit: kHz
+
+% Downsample to lower res (150 pts) using interp1(x,v,xq)
+sliceprofile = interp1(1:size(sliceprofile,1), sliceprofile, 1:4:size(sliceprofile,1))';
+sp_scale = interp1(1:size(sp_scale,1), sp_scale, 1:4:size(sp_scale,1))';
+if plotting == 1; plot(sp_scale,sliceprofile); pause(2); close all; end
+
+% Create 3D slab and resample to 8x MRSI Res
+fprintf('Creating slab...');
+slab3d = repmat(sliceprofile, [1, size(sliceprofile,1), size(sliceprofile,1)]);
+slab3d = permute(slab3d, [3 2 1]); 
+slab3d = resampleobject(slab3d, [128,128,78]);          % go to 8x MRSI size and cut later
+
+clearvars sliceprofile profile
+fprintf('%18.2f\n', toc); 
+
+% Load B1 map and interpolate it to 8x MRSI Res
+% Load vector
+B1vector=load([tmp_dir '/B1vector.raw']);
+% Reshape B1 vector to B1 map (NEEDS CORRECT B1 SIZE)
+B1map_origres=reshape(B1vector,[128 128 20]);
+% Interpolate to CSI resolution: 64x64x39
+B1map=resampleobject(B1map_origres, [128,128,78]);
+B1map=B1map/900;    % Normalize to 90.0 degrees
+
+% [x, y, z ] = ndgrid(1:1:128, 1:1:128, 1:1.0:20);
+% [xq,yq,zq] = ndgrid(1:2:128, 1:2:128, 1:0.5:20); % 064x064x039
+% [xq,yq,zq] = ndgrid(1:1:128, 1:1:128, 1:0.2467:20); % 128x128x078
+% B1map=interpn(x,y,z, B1map_origres, xq, yq, zq);
+
+clearvars B1vector B1map_origres x y z xq yq zq 
+
+% Load mask (may be unnecessary in the future)
+mask = read_RawFiles(sprintf('%s/maps/mask.raw',out_dir),Par.CSI.nFreqEnc, Par.CSI.nPhasEnc, Par.CSI.nPartEnc*Par.CSI.nSLC,'float');
+mask = resampleobject(mask, [128,128,78]);
+
+%[x, y, z ] = ndgrid(1:1:64, 1:1:64, 1:1:39);
+%[xq,yq,zq] = ndgrid(1:63/127:64, 1:63/127:64, 1:38/77:39); % 128x128x078
+%mask=interpn(x,y,z, mask, xq, yq, zq, 'nearest');
+
+clearvars x y z xq yq zq 
+
+%% Combine B1 map, slice profile and mask
+% Thoughts:
+% What it's like:           B1map
+% What it should be like:   slab3d
+% Correction:               slab3d/B1map
+
+% Calculate correction (normalized B1map x alpha x mask)
+B1norm = B1map .* slab3d .* mask;
+% Mask out inf and nan
+% B1norm(B1norm==inf)   = 0; 
+% B1norm(isnan(B1norm)) = 0; 
+
+% Plots
+if plotting == 1
+    close all; for i=1:1:78;  imagesc(squeeze(B1norm(:,:,i))); axis equal; title("Transversal (const. z)"); pause(0.01); end
+    close all; for i=1:1:128; imagesc(squeeze(B1norm(:,i,:))); axis equal; title("Coronal (const. y)");     pause(0.01); end
+    close all; for i=1:1:128; imagesc(squeeze(B1norm(i,:,:))); axis equal; title("Sagittal (const. x)");    pause(0.01); end
+    close all; pause(0.5);
+    imagesc(squeeze(B1norm(:,:,40))); axis equal; title("Transversal (z=40)"); pause(1.3); 
+    imagesc(squeeze(B1norm(:,50,:))); axis equal; title("Coronal  (y=50)");    pause(1.3);
+    imagesc(squeeze(B1norm(50,:,:))); axis equal; title("Sagittal (x=50)");    pause(1.4);
+    close all
+end
+
+% Cut to correct resolution in kSpace
+if size(B1norm)~= size(B1map) % To avoid issues during debugging
+    fprintf('Error: B1 correction map has the wrong size!');
+    return
+end
+
+fprintf('FFT to kSpace, truncate, FFT back... \n');
+
+% FFT -> kSpace
+B1norm(:,:,:) = ifft(B1norm(:,:,:),[],1);
+B1norm(:,:,:) = ifft(B1norm(:,:,:),[],2);
+B1norm(:,:,:) = ifft(B1norm(:,:,:),[],3);
+B1norm = fftshift(fftshift(fftshift(B1norm,1),2),3); 
+
+% Cut
+B1norm = B1norm( ... 
+            size(B1norm,1)/4+1:size(B1norm,1)*3/4, ...
+            size(B1norm,2)/4+1:size(B1norm,2)*3/4, ...
+            ceil(size(B1norm,3)/4+1):ceil(size(B1norm,3)*3/4));         
+     
+% FFT -> iSpace
+B1norm = ifftshift(ifftshift(ifftshift(B1norm,1),2),3); 
+B1norm(:,:,:) = abs(fft(fft(fft(B1norm(:,:,:),[],1),[],2),[],3));  
+fprintf('%34.2f\n', toc);
+
+%%
+B1norm = B1norm .* resampleobject(mask, [64,64,39]);
+
+%% Plots
+if plotting == 1
+    close all; for i=1:1:39; imagesc(squeeze(abs(B1norm(:,:,i)))); axis equal; title("Transversal (const. z)"); pause(0.02); end
+    close all; for i=1:1:64; imagesc(squeeze(abs(B1norm(:,i,:)))); axis equal; title("Coronal (const. y)"); pause(0.01); end
+    close all; for i=1:1:64; imagesc(squeeze(abs(B1norm(i,:,:)))); axis equal; title("Sagittal (const. x)"); pause(0.01); end
+    close all;
+end
+
+%% Create metabolite-specific correction map for grey and white matter
+TR    = 0.45;                               % 450 ms
+Mzero = 1.00;                               % Normalized M0
+%ernst = 39/180*pi;                         % Ernst angle: 39 degrees in radians
+FAmap = B1norm*pi/180;                      % Flip angle map
+
+% T1 times for different metabolites in GM and WM [s]
+% See Hangel 2021 https://analyticalsciencejournals.onlinelibrary.wiley.com/doi/full/10.1002/nbm.4596
+% ASP intentionally omitted
+%     tCho  tCr   GABA  Glu   Gln   Gly   GSH   mIns  NAA   NAAG  Ser   Tau   Water
+T1GM=[1.510 1.780 1.100 1.610 1.540 1.400 1.140 1.280 1.535 1.210 1.400 2.150 2.000];   
+%     tCho  tCr   GABA  Glu   Gln   Gly   GSH   mIns  NAA   NAAG  Ser   Tau   Water
+T1WM=[1.320 1.740 1.200 1.750 1.740 1.400 1.060 1.190 1.545 0.940 1.400 2.090 1.550];   
+
+CorrectionMaps.GM.tCho = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 1))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 1)));
+CorrectionMaps.GM.tCr  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 2))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 2)));
+CorrectionMaps.GM.GABA = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 3))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 3)));
+CorrectionMaps.GM.Glu  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 4))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 4)));
+CorrectionMaps.GM.Gln  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 5))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 5)));
+CorrectionMaps.GM.Gly  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 6))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 6)));
+CorrectionMaps.GM.GSH  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 7))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 7)));
+CorrectionMaps.GM.mIns = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 8))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 8)));
+CorrectionMaps.GM.NAA  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM( 9))) ./ (1-cos(FAmap)*exp(-TR/T1GM( 9)));
+CorrectionMaps.GM.NAAG = Mzero * sin(FAmap) * (1-exp(-TR/T1GM(10))) ./ (1-cos(FAmap)*exp(-TR/T1GM(10)));
+CorrectionMaps.GM.Ser  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM(11))) ./ (1-cos(FAmap)*exp(-TR/T1GM(11)));
+CorrectionMaps.GM.Tau  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM(12))) ./ (1-cos(FAmap)*exp(-TR/T1GM(12)));
+CorrectionMaps.GM.HHO  = Mzero * sin(FAmap) * (1-exp(-TR/T1GM(13))) ./ (1-cos(FAmap)*exp(-TR/T1GM(13)));
+
+CorrectionMaps.WM.tCho = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 1))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 1)));
+CorrectionMaps.WM.tCr  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 2))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 2)));
+CorrectionMaps.WM.GABA = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 3))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 3)));
+CorrectionMaps.WM.Glu  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 4))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 4)));
+CorrectionMaps.WM.Gln  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 5))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 5)));
+CorrectionMaps.WM.Gly  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 6))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 6)));
+CorrectionMaps.WM.GSH  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 7))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 7)));
+CorrectionMaps.WM.mIns = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 8))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 8)));
+CorrectionMaps.WM.NAA  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM( 9))) ./ (1-cos(FAmap)*exp(-TR/T1WM( 9)));
+CorrectionMaps.WM.NAAG = Mzero * sin(FAmap) * (1-exp(-TR/T1WM(10))) ./ (1-cos(FAmap)*exp(-TR/T1WM(10)));
+CorrectionMaps.WM.Ser  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM(11))) ./ (1-cos(FAmap)*exp(-TR/T1WM(11)));
+CorrectionMaps.WM.Tau  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM(12))) ./ (1-cos(FAmap)*exp(-TR/T1WM(12)));
+CorrectionMaps.WM.HHO  = Mzero * sin(FAmap) * (1-exp(-TR/T1WM(13))) ./ (1-cos(FAmap)*exp(-TR/T1WM(13)));
+
+
+%% Weight according to GM and WM maps
+GMmap = read_RawFiles(sprintf('%s/maps/Extra/GM_CSI_map.raw',out_dir),Par.CSI.nFreqEnc, Par.CSI.nPhasEnc, Par.CSI.nPartEnc*Par.CSI.nSLC,'float');
+WMmap = read_RawFiles(sprintf('%s/maps/Extra/WM_CSI_map.raw',out_dir),Par.CSI.nFreqEnc, Par.CSI.nPhasEnc, Par.CSI.nPartEnc*Par.CSI.nSLC,'float');
+
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCr = GMmap .* CorrectionMaps.GM.tCr  + WMmap .* CorrectionMaps.WM.tCr ;
+CorrectionMaps.combined.GABA = GMmap .* CorrectionMaps.GM.GABA + WMmap .* CorrectionMaps.WM.GABA;
+CorrectionMaps.combined.Glu  = GMmap .* CorrectionMaps.GM.Glu  + WMmap .* CorrectionMaps.WM.Glu ;
+CorrectionMaps.combined.Gln = GMmap .* CorrectionMaps.GM.Gln + WMmap .* CorrectionMaps.WM.Gln;
+CorrectionMaps.combined.Gly = GMmap .* CorrectionMaps.GM.Gly + WMmap .* CorrectionMaps.WM.Gly;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+CorrectionMaps.combined.tCho = GMmap .* CorrectionMaps.GM.tCho + WMmap .* CorrectionMaps.WM.tCho;
+
+
+%% Write to raw file
+%path=sprintf('%s/B1correction.raw',tmp_dir);
+%fid=fopen(path,'w+');
+%fwrite(fid,B1norm(:,:,:),'float');
+%fclose(fid);
+
+%% Finishing
+% fprintf('B1_correction.m completed!\n');
+% fprintf('Next, run this in the terminal:\n');
+% fprintf('cd %s\n', tmp_dir);
+% fprintf('/opt/minc/1.9.18/bin/rawtominc -float -clobber -like csi_template.mnc -input B1correction.raw B1correction.mnc\n');
+% fprintf('register B1correction.mnc magnitude.mnc\n');
+
+%% Round slab values to two decimal places.
+% Multiplication by 100 is necessary because register is weird and shows
+% double values below 1 as 0 (-> black).
+%fprintf('Slab has values from 0 to 100.\n');
+%slab3d = round(slab3d*100);
+
+
+end

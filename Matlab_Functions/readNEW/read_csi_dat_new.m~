@@ -1,0 +1,315 @@
+function [kSpace, Info] = read_csi_dat_new(file, tmp_dir)
+
+
+    kSpace.ONLINE=0;
+    kSpace.PATREFSCAN=0;
+    kSpace.NOISEADJSCAN=0;
+
+
+    inData=mapVBVD(file);
+
+    if(size(inData,2)==2)
+        inData=inData{2};
+    end
+%%
+    Info.Par.PhaseLines =  inData.hdr.Config.PhaseEncodingLines;
+    Info.Par.PhaseFoV =  inData.hdr.Config.PhaseFoV;
+    Info.Par.PhaseVOI =  inData.hdr.Config.PhaseFoV;
+    Info.Par.ReadLines =  inData.hdr.Config.PhaseEncodingLines;
+    Info.Par.ReadFOV =  inData.hdr.Config.PhaseFoV;
+    Info.Par.ReadVOI =  inData.hdr.Config.PhaseFoV;
+    Info.Par.SliceLines =  inData.hdr.Spice.Partitions; 
+    Info.Par.SliceFOV =  inData.hdr.MeasYaps.sSliceArray.asSlice{1}.dThickness;
+    Info.Par.SliceVOI =  inData.hdr.Phoenix.sSpecPara.sVoI.dThickness;
+
+    Info.Par.VoiPositionCor =  inData.image.slicePos(2,1);
+    Info.Par.VoiPositionSag =  inData.image.slicePos(1,1);
+    Info.Par.VoiPositionTra =  inData.image.slicePos(3,1);
+    Info.Par.Dwelltime = inData.hdr.MeasYaps.sRXSPEC.alDwellTime{1};
+    Info.Par.nAve =  inData.hdr.Config.NAve;
+    Info.Par.PatientName = inData.hdr.Config.PatientName;
+    Info.Par.LarmorFreq = inData.hdr.Dicom.lFrequency;
+    %  = numel(inData.hdr.MeasYaps.sCoilSelectMeas.aRxCoilSelectData{1}.asList);
+    
+   
+    
+    if(strcmpi(inData.image.softwareVersion,'vd'))
+         Info.Par.nCha = numel(inData.hdr.MeasYaps.sCoilSelectMeas.aRxCoilSelectData{1}.asList);
+    end
+
+    if(strcmpi(inData.image.softwareVersion,'vb'))
+        Info.Par.nCha = numel(inData.hdr.MeasYaps.asCoilSelectMeas{1}.asList);
+    end
+
+%%  
+ 	tmpfolder = [tmp_dir, '/read_csi_dat_new_tmp_', datestr(now, 'yyyymmdd-hhMMss')];
+        
+    for CurrentMeasSet2 = transpose(fields(kSpace))
+        CurrentMeasSet = CurrentMeasSet2{1};  
+
+        tmpfoldercurrent = [tmpfolder, '/', (CurrentMeasSet)];
+        mkdir(tmpfoldercurrent);
+       
+        fprintf('\nRead\t%s data.', CurrentMeasSet)
+
+        % Check if there is enough memory to procede
+        % Get File Size
+        datfile = dir(file);
+        filesize = datfile.bytes;
+        fprintf('\nFile size: \t\t\t %6.0f MB.', filesize/pow2(20));
+      
+        while 1    
+            [unixuser, message] = unix('free -b');
+            messagesplit = strsplit(message,{' ','\n'});
+            memfree = messagesplit(14);         % free + cached (free to be reallocated!)
+            memfree = str2num(memfree{1});
+            fprintf('\nAvailable memory: \t\t %6.0f MB.', memfree/pow2(20));
+            % Not enough memory
+            if memfree/filesize > 1.05  % five percent safety margin 
+                fprintf('\nSufficient memory. Proceed.');   
+                break
+            end
+            pause(60);
+        end
+             
+        % Once there is enough free memory:
+        % Allocate the memory => create an array of the same memory size (+2.5% safety)
+%        fprintf('\nAllocating memory.');
+%        inImage = ones(inData.image.dataSize);
+        
+        
+        fprintf('\nLoading data...');   
+        
+        if(strcmp(CurrentMeasSet2,'ONLINE'))
+            tic;inImage=feval('single',inData.image());
+        elseif(strcmp(CurrentMeasSet2,'PATREFSCAN'))
+            tic;inImage=feval('single',inData.refscan());
+        elseif(strcmp(CurrentMeasSet2,'NOISEADJSCAN'))
+            kSpace.(CurrentMeasSet)=permute(feval('single',inData.noise()),[2 1 3]);
+            fprintf('\nWrite inData.noise to disk.\n%s\n', tmpfoldercurrent);
+            inDataNoise = single(inData.noise());
+            save([tmpfoldercurrent, '/inDataNoise.mat'], 'inDataNoise');         
+            clear inDataNoise
+            fprintf('\n##################################################\n')
+            continue;
+        end
+        fprintf('\n\t\t\t\t...took\t%10.2f seconds',toc) 
+
+        inImage=squeeze_single_dim(inImage,4); 
+        inImage=squeeze_single_dim(inImage,4);
+        inImage=squeeze_single_dim(inImage,4);
+        inImage=squeeze_single_dim(inImage,4);
+        inImage=squeeze_single_dim(inImage,4);
+        inImage=squeeze_single_dim(inImage,4);
+        inImage=squeeze_single_dim(inImage,5);
+
+
+        nCha = size(inImage,2);
+        nAve = size(inImage,4);
+        nRings = size(inImage,3);
+        nPointsPerRing = 2*inData.image.NPointsPerCircle;
+        nADCmax=size(inImage,5);
+        nPointsPerADC = size(inImage,1);
+        nVec= round(nPointsPerADC*nADCmax/nPointsPerRing-0.5);
+        nTImax=size(inImage,6);
+%         
+%         Info.Data(7,:)=unique(inData.image.Lin,'stable'); % we also need this later before gridding!!!
+%         inImage=inImage(:,:,  Info.Data(7,:)  ,:,:,:,:,:);
+%         
+        temp=inImage(1,1,:,:,:,:);
+        isvarTI=0;
+        isconstTI=0;
+        if(sum(temp(:)==0)>0)
+            isvarTI=1;
+        else
+            isconstTI=1;
+        end
+        clear temp;
+
+        tic
+        fprintf('\nReshape\t%s data.', CurrentMeasSet)
+        if(strcmp(CurrentMeasSet2,'ONLINE'))
+            counter = 2;
+            counter1 = 1;
+            temp=inData.image.iceParam;
+            Info.Data=NaN(6,nRings);
+            Info.Data(1:4,1)=temp(1:4,1);
+            Info.Data(6,1)=1;
+
+            for n=2:size(temp,2)
+                if(inData.image.Lin(n)~=inData.image.Lin(n-1) )
+                    Info.Data(1:4,counter)=temp(1:4,n);
+                    if(temp(1,n)<temp(1,n-1))
+                        counter1 = counter1 + 1;
+                    end
+                    Info.Data(6,counter)=counter1;
+                    counter = counter + 1;
+                end
+            end
+            clear temp counter counter 1
+
+            
+            [brauchmaned,brauchma]=sort(unique(inData.image.Lin,'stable'));
+            Info.Data=Info.Data(:,brauchma);
+            
+            
+            for n=1:nRings
+                if(Info.Data(3,n)>60000)
+                    Info.Data(3,n) = Info.Data(3,n) -65536;
+                end
+                if(Info.Data(4,n)>20000)
+                    Info.Data(4,n) = Info.Data(4,n) -65536;
+                end
+            end
+        end
+
+
+        if(isvarTI)
+            fprintf('\nThis is variable TI data\n');
+            nVec = floor(nVec  / factorial(nTImax)) * factorial(nTImax); 
+        else 
+            fprintf('\nThis is constant TI data\n');
+        end
+        
+        fprintf('\n\t\t\t\t...took\t%10.2f seconds',toc) 
+        
+        fprintf('\nWrite\t%s data to hdf5 files.\n', CurrentMeasSet)
+        
+
+        
+        format short g 
+        fprintf('Write HDF5 files for all %i channels to disk.\n%s\n', nCha, tmpfoldercurrent);
+        writeHDF5 = tic;
+                
+
+        for iCha = 1:nCha;      % 33 GB / 13 GB ~ 2.5
+            fprintf('Channel %3i ', iCha);
+            
+            temp_allrings_real.(CurrentMeasSet) = zeros(1,nRings,nPointsPerRing,1,1,nVec,nAve,'single');
+            temp_allrings_imag.(CurrentMeasSet) = zeros(1,nRings,nPointsPerRing,1,1,nVec,nAve,'single');
+
+            inImage_temp = inImage(:,iCha,:,:,:,:); 
+            inImage_temp=permute(inImage_temp,[2 3 4 6 1 5]);
+            inImage_temp=reshape(inImage_temp,[size(inImage_temp,1) size(inImage_temp,2) size(inImage_temp,3) size(inImage_temp,4) size(inImage_temp,5)*size(inImage_temp,6)]);
+                    
+%             lukas
+%             [brauchmaned,brauchma]=sort(Info.Data(7,:));
+%             inImage_temp=inImage_temp(:,brauchma,:,:,:,:);
+       
+%         prevlen = 0;
+            for iRing=1:nRings
+        %             msg = sprintf('iRing %d/%d of Cha %d\n',iRing,nRings,iCha);
+        %             fprintf([repmat('\b',1,prevlen) '%s'],msg);
+        %             prevlen = numel(msg);
+
+                temp=inImage_temp(:,iRing,:,:,:);
+                nTI=sum(temp(1,1,1,:,1,1)~=0);
+                Info.Data(5,iRing)=nTI;
+                         
+                temp=temp(:,:,:,1:nTI,:);
+                TakeOnlyPoints=nVec/nTI*nPointsPerRing;
+                temp=temp(:);
+                if(  nTI==2 || nTI==3  || nTI ==4 )
+                   temp(numel(temp)/nTI+1:end)=[];
+                end
+
+                temp=reshape(temp,[size(inImage_temp,1) 1 size(inImage_temp,3) nTI size(inImage_temp,5)*size(inImage_temp,6)/nTI]);
+
+                temp=temp(:,:,:,:,1:TakeOnlyPoints);
+
+                temp=reshape(temp,[size(inImage_temp,1) size(inImage_temp,3) nTI nPointsPerRing nVec/nTI]);
+                temp=permute(temp,[1 2 4 3 5]);
+                temp=reshape(temp,[size(inImage_temp,1) size(inImage_temp,3) nPointsPerRing nVec]);
+                temp=permute(temp,[1 3 4 2]);
+
+                temp_allrings_real.(CurrentMeasSet)(1,iRing,:,1,1,:,:) = single(real(temp(:,:,:,:)));
+                temp_allrings_imag.(CurrentMeasSet)(1,iRing,:,1,1,:,:) = single(imag(temp(:,:,:,:)));
+                            
+            end     % rings
+            clear temp 
+            
+            tmpfilename = sprintf('%s/tmp_real_channel_%02i.h5', tmpfoldercurrent, iCha);
+            tmpdatasetname = sprintf('/data'); %_%0i', fileCtr);
+            h5create(tmpfilename, tmpdatasetname, size(temp_allrings_real.(CurrentMeasSet)));
+            h5write(tmpfilename, tmpdatasetname, temp_allrings_real.(CurrentMeasSet));
+            clear tmpfilename tmpdatasetname 
+            
+            tmpfilename = sprintf('%s/tmp_imag_channel_%02i.h5', tmpfoldercurrent, iCha);
+            tmpdatasetname = sprintf('/data'); %_%0i', fileCtr);
+            h5create(tmpfilename, tmpdatasetname, size(temp_allrings_imag.(CurrentMeasSet)));
+            h5write(tmpfilename, tmpdatasetname, temp_allrings_imag.(CurrentMeasSet));
+            clear tmpfilename tmpdatasetname
+            
+            clear temp_allrings_real temp_allrings_imag 
+            
+            fprintf('\t%.2f\n', toc(writeHDF5)/60);
+        end         % channels
+        
+        fprintf('Writing .h5 files took %.2f minutes.\n', toc(writeHDF5)/60);
+        
+        clear inImage_temp inImage  
+
+
+
+        fprintf('\n##################################################\n')
+        
+    end     % End of for-loop (ONLINE, ...)
+    
+        fprintf('\n');
+
+% ####################################################################################################    
+% Load from HDD after deleting large variables 
+    readHDF5 = tic;
+    format short g  
+    for CurrentMeasSet2 = transpose(fields(kSpace))
+        CurrentMeasSet = CurrentMeasSet2{1};  
+        fprintf('\nRead\t%s data from hdf5 file.\n', CurrentMeasSet)
+        
+        tmpfoldercurrent = [tmpfolder, '/', (CurrentMeasSet)];        
+        if(strcmp(CurrentMeasSet,'NOISEADJSCAN'))
+            fprintf('Reading just a single .mat file... ');
+            inDataNoise = load([tmpfoldercurrent, '/inDataNoise.mat']);     
+            kSpace.(CurrentMeasSet)=permute(feval('single',inDataNoise.inDataNoise),[2 1 3]);
+            fprintf('Done. \t%.2f\n', toc(writeHDF5)/60);
+            fprintf('\n##################################################\n');
+            
+            continue
+        end
+
+
+        
+        fprintf('Read HDF5 files of ');	
+        fprintf('%i channels, %i rings...\n', nCha, nRings);
+        
+        for iCha = 1:nCha
+            fprintf('Channel %3i ', iCha);
+            tmpfilename = sprintf('%s/tmp_real_channel_%02i.h5', tmpfoldercurrent, iCha);
+            kSpace_real.(CurrentMeasSet)(iCha,:,:,1,1,:) = single(h5read(tmpfilename, '/data'));
+            
+            tmpfilename = sprintf('%s/tmp_imag_channel_%02i.h5', tmpfoldercurrent, iCha);
+            kSpace_imag.(CurrentMeasSet)(iCha,:,:,1,1,:) = single(h5read(tmpfilename, '/data'));
+            fprintf('\t%.2f\n', toc(readHDF5)/60);
+        end
+        
+        % Allocate here %
+        kSpace.(CurrentMeasSet) = zeros(nCha,nRings,nPointsPerRing,1,1,nVec,nAve,'single');
+        
+        kSpace.(CurrentMeasSet) = kSpace_real.(CurrentMeasSet) + j*kSpace_imag.(CurrentMeasSet);
+        clear kSpace_real kSpace_imag
+         
+
+        fprintf('\n##################################################\n')
+        
+    end
+    
+fprintf('Reading .h5 files completed in %.2f minutes.\n\n', toc(readHDF5)/60);
+
+% remove tmpfolder incl. subfolders and files inside (=all .h5 files)
+% tmpfolder = [tmp_dir, '/read_csi_dat_new_tmp_', date and time...];
+% Note: rmdir tmpfolder s does not work because it tires to remove ./tmpfolder/ instead of using the
+% proper path stored in the variable tmpfolder.
+
+rmdir(tmpfolder, 's');	
+clear inData tmpfolder tmpfoldercurrent
+
+end

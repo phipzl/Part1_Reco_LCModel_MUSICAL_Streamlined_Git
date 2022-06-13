@@ -1,0 +1,12 @@
+v2: Add FLAIR readin for patient data (new flag in Part1_ProcessMRSI.sh , readin in create_mask, saved in maps as .mnc)
+v3: ZF
+v4:Te truncation
+v5: CbC L2
+v6: fixed CbC
+v7: fix snr, fix -F, fix parfor, fix FOV shift (@LHINGERL)
+v9: improved RAM-usage at reading (@PLAZEN)
+v10: WREF fix for concept (@LHINGERL)
+
+future: semi-quantification in pt2
+
+Based on v14

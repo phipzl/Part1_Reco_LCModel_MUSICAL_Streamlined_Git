@@ -1,0 +1,467 @@
+6. Process Data and Prepare LCModel Processing
+
+
+
+
+Running:
+
+"/bilbo/usr/local/matlab2013a/bin/matlab -r tmp_dir = 'tmp1'; CurAvg=1; Paths = regexp(path,':','split');rmpathss = ~cellfun('isempty',strfind(Paths,'Matlab_Functions')); if(sum(rmpathss) > 0); x = strcat(Paths(rmpathss), {':'});x = [x{:}]; rmpath(x); end; clear Paths rmpathss x; addpath(genpath('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Sourcecode/MRSI_Processing_ReleaseVersions/Part1_Reco_LCModel_MUSICAL_newREAD_usedbyGilbert_v10/Matlab_Functions'))"
+
+                            < M A T L A B (R) >
+                  Copyright 1984-2013 The MathWorks, Inc.
+                    R2013a (8.1.0.604) 64-bit (glnxa64)
+                             February 15, 2013
+
+ 
+To get started, type one of these: helpwin, helpdesk, or demo.
+For product information, visit www.mathworks.com.
+ 
+>> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> 
+
+READ CSI DATA
+>> >> >> Software version: VB (!?)
+Scan 1/1, read all mdhs:
+      1 % read in    1 s; estimated time left:  100 s 
+      2 % read in    2 s; estimated time left:  100 s 
+      3 % read in    3 s; estimated time left:  101 s 
+      4 % read in    4 s; estimated time left:  104 s 
+      5 % read in    5 s; estimated time left:  104 s 
+      6 % read in    7 s; estimated time left:  104 s 
+      7 % read in    8 s; estimated time left:  104 s 
+      8 % read in    9 s; estimated time left:  103 s 
+      9 % read in   10 s; estimated time left:  103 s 
+     10 % read in   11 s; estimated time left:  102 s 
+     11 % read in   12 s; estimated time left:  100 s 
+     12 % read in   13 s; estimated time left:   98 s 
+     13 % read in   14 s; estimated time left:   97 s 
+     14 % read in   15 s; estimated time left:   95 s 
+     15 % read in   16 s; estimated time left:   93 s 
+     16 % read in   18 s; estimated time left:   92 s 
+     17 % read in   19 s; estimated time left:   91 s 
+     18 % read in   20 s; estimated time left:   91 s 
+     19 % read in   21 s; estimated time left:   90 s 
+     20 % read in   22 s; estimated time left:   89 s 
+     21 % read in   24 s; estimated time left:   89 s 
+     22 % read in   25 s; estimated time left:   88 s 
+     23 % read in   26 s; estimated time left:   87 s 
+     24 % read in   27 s; estimated time left:   86 s 
+     25 % read in   28 s; estimated time left:   85 s 
+     26 % read in   30 s; estimated time left:   84 s 
+     27 % read in   31 s; estimated time left:   83 s 
+     28 % read in   32 s; estimated time left:   82 s 
+     29 % read in   33 s; estimated time left:   81 s 
+     30 % read in   34 s; estimated time left:   80 s 
+     31 % read in   36 s; estimated time left:   79 s 
+     32 % read in   37 s; estimated time left:   78 s 
+     33 % read in   38 s; estimated time left:   77 s 
+     34 % read in   39 s; estimated time left:   76 s 
+     35 % read in   40 s; estimated time left:   75 s 
+     36 % read in   42 s; estimated time left:   74 s 
+     37 % read in   43 s; estimated time left:   73 s 
+     38 % read in   44 s; estimated time left:   72 s 
+     39 % read in   45 s; estimated time left:   71 s 
+     40 % read in   46 s; estimated time left:   70 s 
+     41 % read in   48 s; estimated time left:   69 s 
+     42 % read in   49 s; estimated time left:   67 s 
+     43 % read in   50 s; estimated time left:   66 s 
+     44 % read in   51 s; estimated time left:   65 s 
+     45 % read in   52 s; estimated time left:   64 s 
+     46 % read in   54 s; estimated time left:   63 s 
+     47 % read in   55 s; estimated time left:   62 s 
+     48 % read in   56 s; estimated time left:   61 s 
+     49 % read in   57 s; estimated time left:   59 s 
+     50 % read in   58 s; estimated time left:   58 s 
+     51 % read in   60 s; estimated time left:   57 s 
+     52 % read in   61 s; estimated time left:   56 s 
+     53 % read in   62 s; estimated time left:   55 s 
+     54 % read in   63 s; estimated time left:   54 s 
+     55 % read in   64 s; estimated time left:   53 s 
+     56 % read in   65 s; estimated time left:   51 s 
+     57 % read in   67 s; estimated time left:   50 s 
+     58 % read in   68 s; estimated time left:   49 s 
+     59 % read in   69 s; estimated time left:   48 s 
+     60 % read in   70 s; estimated time left:   47 s 
+     61 % read in   71 s; estimated time left:   45 s 
+     62 % read in   72 s; estimated time left:   44 s 
+     63 % read in   73 s; estimated time left:   43 s 
+     64 % read in   75 s; estimated time left:   42 s 
+     65 % read in   76 s; estimated time left:   41 s 
+     66 % read in   77 s; estimated time left:   40 s 
+     67 % read in   78 s; estimated time left:   38 s 
+     68 % read in   79 s; estimated time left:   37 s 
+     69 % read in   80 s; estimated time left:   36 s 
+     70 % read in   82 s; estimated time left:   35 s 
+     71 % read in   83 s; estimated time left:   34 s 
+     72 % read in   84 s; estimated time left:   33 s 
+     73 % read in   85 s; estimated time left:   32 s 
+     74 % read in   86 s; estimated time left:   30 s 
+     75 % read in   88 s; estimated time left:   29 s 
+     76 % read in   89 s; estimated time left:   28 s 
+     77 % read in   90 s; estimated time left:   27 s 
+     78 % read in   91 s; estimated time left:   26 s 
+     79 % read in   92 s; estimated time left:   25 s 
+     80 % read in   93 s; estimated time left:   23 s 
+     81 % read in   95 s; estimated time left:   22 s 
+     82 % read in   96 s; estimated time left:   21 s 
+     83 % read in   97 s; estimated time left:   20 s 
+     84 % read in   98 s; estimated time left:   19 s 
+     85 % read in   99 s; estimated time left:   18 s 
+     86 % read in  100 s; estimated time left:   16 s 
+     87 % read in  102 s; estimated time left:   15 s 
+     88 % read in  103 s; estimated time left:   14 s 
+     89 % read in  104 s; estimated time left:   13 s 
+     90 % read in  105 s; estimated time left:   12 s 
+     91 % read in  106 s; estimated time left:   11 s 
+     92 % read in  108 s; estimated time left:    9 s 
+     93 % read in  109 s; estimated time left:    8 s 
+     94 % read in  110 s; estimated time left:    7 s 
+     95 % read in  111 s; estimated time left:    6 s 
+     96 % read in  112 s; estimated time left:    5 s 
+     97 % read in  113 s; estimated time left:    4 s 
+     98 % read in  114 s; estimated time left:    2 s 
+     99 % read in  116 s; estimated time left:    1 s 
+    100 % read in  117 s; estimated time left:    0 s 
+          parse mdhs... done. (0.159011 seconds)
+
+Read	ONLINE data.
+File size: 			  84531 MB.
+Available memory: 		 469284 MB.
+Sufficient memory. Proceed.
+Loading data... Reading data using a fixed block size... 
+Creating complex array "out"... Done.
+Going through the memory and reading data...
+Expensive computations...  2048
+Expensive computations...  4096
+Expensive computations...  6144
+Expensive computations...  8192
+Expensive computations...  10240
+Expensive computations...  12288
+Expensive computations...  14336
+Expensive computations...  16384
+Expensive computations...  18432
+Expensive computations...  20480
+Expensive computations...  22528
+Expensive computations...  24576
+Expensive computations...  26624
+Expensive computations...  28672
+Expensive computations...  30720
+Expensive computations...  32768
+Expensive computations...  34816
+Expensive computations...  36864
+Expensive computations...  38912
+Expensive computations...  40960
+Expensive computations...  43008
+Expensive computations...  45056
+Expensive computations...  46752
+
+				...took	    455.42 seconds
+Reshape	ONLINE data.
+This is variable TI data
+
+				...took	      4.03 seconds
+Write	ONLINE data to hdf5 files.
+Write HDF5 files for all 32 channels to disk.
+tmp1/read_csi_dat_new_tmp_20200130-102531/ONLINE
+Channel   1 	2.86
+Channel   2 	5.73
+Channel   3 	8.77
+Channel   4 	11.55
+Channel   5 	14.31
+Channel   6 	17.21
+Channel   7 	20.22
+Channel   8 	22.89
+Channel   9 	25.62
+Channel  10 	28.56
+Channel  11 	31.56
+Channel  12 	34.59
+Channel  13 	37.39
+Channel  14 	40.20
+Channel  15 	43.00
+Channel  16 	46.14
+Channel  17 	49.02
+Channel  18 	51.85
+Channel  19 	54.76
+Channel  20 	57.64
+Channel  21 	60.75
+Channel  22 	63.65
+Channel  23 	66.47
+Channel  24 	69.29
+Channel  25 	72.53
+Channel  26 	75.64
+Channel  27 	78.56
+Channel  28 	81.46
+Channel  29 	84.33
+Channel  30 	87.17
+Channel  31 	90.13
+Channel  32 	93.00
+Writing .h5 files took 93.00 minutes.
+
+##################################################
+
+Read	PATREFSCAN data.
+File size: 			  84531 MB.
+Available memory: 		 469327 MB.
+Sufficient memory. Proceed.
+Loading data... Reading data using a fixed block size... 
+Creating complex array "out"... Done.
+Going through the memory and reading data...
+Expensive computations...  2048
+Expensive computations...  4096
+Expensive computations...  5844
+
+				...took	     17.53 seconds
+Reshape	PATREFSCAN data.
+This is variable TI data
+
+				...took	      0.00 seconds
+Write	PATREFSCAN data to hdf5 files.
+Write HDF5 files for all 32 channels to disk.
+tmp1/read_csi_dat_new_tmp_20200130-102531/PATREFSCAN
+Channel   1 	0.06
+Channel   2 	0.12
+Channel   3 	0.18
+Channel   4 	0.25
+Channel   5 	0.33
+Channel   6 	0.40
+Channel   7 	0.47
+Channel   8 	0.54
+Channel   9 	0.60
+Channel  10 	0.67
+Channel  11 	0.73
+Channel  12 	0.80
+Channel  13 	0.87
+Channel  14 	0.94
+Channel  15 	1.00
+Channel  16 	1.07
+Channel  17 	1.14
+Channel  18 	1.20
+Channel  19 	1.26
+Channel  20 	1.34
+Channel  21 	1.41
+Channel  22 	1.47
+Channel  23 	1.53
+Channel  24 	1.59
+Channel  25 	1.66
+Channel  26 	1.73
+Channel  27 	1.79
+Channel  28 	1.86
+Channel  29 	1.92
+Channel  30 	1.98
+Channel  31 	2.05
+Channel  32 	2.12
+Writing .h5 files took 2.12 minutes.
+
+##################################################
+
+Read	NOISEADJSCAN data.
+File size: 			  84531 MB.
+Available memory: 		 469348 MB.
+Sufficient memory. Proceed.
+Loading data... Reading data using a fixed block size... 
+Creating complex array "out"... Done.
+Going through the memory and reading data...
+Expensive computations...    33
+
+Write inData.noise to disk.
+tmp1/read_csi_dat_new_tmp_20200130-102531/NOISEADJSCAN
+ Reading data using a fixed block size... 
+Creating complex array "out"... Done.
+Going through the memory and reading data...
+Expensive computations...    33
+
+##################################################
+
+
+Read	ONLINE data from hdf5 file.
+Read HDF5 files of 32 channels, 974 rings...
+Channel   1 	0.28
+Channel   2 	0.71
+Channel   3 	1.23
+Channel   4 	1.81
+Channel   5 	2.52
+Channel   6 	3.32
+Channel   7 	4.28
+Channel   8 	5.18
+Channel   9 	6.15
+Channel  10 	7.23
+Channel  11 	8.37
+Channel  12 	9.62
+Channel  13 	10.90
+Channel  14 	12.15
+Channel  15 	13.46
+Channel  16 	15.04
+Channel  17 	16.64
+Channel  18 	18.35
+Channel  19 	20.11
+Channel  20 	22.08
+Channel  21 	24.05
+Channel  22 	26.26
+Channel  23 	28.48
+Channel  24 	30.93
+Channel  25 	33.18
+Channel  26 	35.43
+Channel  27 	37.76
+Channel  28 	40.18
+Channel  29 	42.69
+Channel  30 	45.21
+Channel  31 	47.77
+Channel  32 	50.52
+
+##################################################
+
+Read	PATREFSCAN data from hdf5 file.
+Read HDF5 files of 32 channels, 974 rings...
+Channel   1 	50.78
+Channel   2 	50.79
+Channel   3 	50.80
+Channel   4 	50.81
+Channel   5 	50.82
+Channel   6 	50.84
+Channel   7 	50.85
+Channel   8 	50.87
+Channel   9 	50.88
+Channel  10 	50.90
+Channel  11 	50.92
+Channel  12 	50.94
+Channel  13 	50.96
+Channel  14 	50.98
+Channel  15 	51.00
+Channel  16 	51.03
+Channel  17 	51.05
+Channel  18 	51.08
+Channel  19 	51.10
+Channel  20 	51.12
+Channel  21 	51.15
+Channel  22 	51.18
+Channel  23 	51.20
+Channel  24 	51.23
+Channel  25 	51.26
+Channel  26 	51.29
+Channel  27 	51.32
+Channel  28 	51.35
+Channel  29 	51.39
+Channel  30 	51.42
+Channel  31 	51.45
+Channel  32 	51.51
+
+##################################################
+
+Read	NOISEADJSCAN data from hdf5 file.
+Reading just a single .mat file... Done. 	53.98
+
+##################################################
+Reading .h5 files completed in 51.54 minutes.
+
+Error using rmdir
+/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Sourcecode/MRSI_Processing_ReleaseVersions/Part1_Reco_LCModel_MUSICAL_newREAD_usedbyGilbert_v10/tmpfolder
+is not a directory.
+
+Error in read_csi_dat_new (line 307)
+rmdir tmpfolder s	% remove tmpfolder incl. subfolders and files inside
+(=all .h5 files)
+
+Error in read_csi_new (line 74)
+    [kSpace,ReadInInfo] = read_csi_dat_new(file, tmp_dir);
+ 
+>> Undefined variable "kSpace" or function "kSpace.ONLINE".
+ 
+>> Undefined function or variable 'csi_k'.
+ 
+>> >> Undefined variable "kSpace" or function "kSpace.PATREFSCAN".
+ 
+>> Undefined function or variable 'image_k'.
+ 
+>> >> Undefined function 'size_csi' for input arguments of type 'double'.
+ 
+>> Undefined function or variable 'csi_k'.
+ 
+>> >> >> >> Undefined function or variable 'Noise'.
+ 
+>> Reference to non-existent field 'NoiseCorrMat'.
+ 
+>> >> >> >> >> >> >> Undefined function or variable 'csi_k'.
+ 
+>> Undefined function or variable 'csi_k'.
+ 
+>> >> >> >> >> Operands to the || and && operators must be convertible to logical scalar
+values.
+ 
+>> >> >> >> >> >> 
+
+READ IMAGING DATA AND MASK
+Undefined variable "ReadInInfo" or function "ReadInInfo.Par.ReadLines".
+ 
+>> >> >> >> >> >> >> >> >> >> Undefined variable "ReadInInfo" or function "ReadInInfo.Par.SliceLines".
+ 
+>> >> >> >> >> Reference to non-existent field 'SliceLines'.
+ 
+>> >> Undefined function or variable 'csi'.
+ 
+>> >> >> >> >> 
+
+Perform Bilgic Lipid Decontamination: channelwise & sensitivity-weighted
+Undefined function or variable 'csi'.
+ 
+>> >> >> >> 
+
+Compute the Coil Combination Weights w_n
+Undefined function 'size_csi' for input arguments of type 'double'.
+ 
+>> >> >> >> >> >> >> >> >> 
+
+Weight and Sum CSI Data
+>> Undefined function or variable 'csi'.
+ 
+>> >> >> >> >> Undefined function or variable 'csi'.
+ 
+>> >> >> >> >> >> 
+
+Compute the Scaling Matrix . . .
+>> >> >> >> >> >> 
+
+Scale MRSI Data
+>> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> Done.
+>> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> >> 
+
+WRITE LCM-FILES
+Reference to non-existent field 'LarmorFreq'.
+ 
+>> >> >> >> >> 
+
+The MRSI Pre-Processing and LCModel preparations took 9431.988007 s.
+>> >> >> >> >> 
+
+7. LCmodel processing started!
+
+
+chmod: cannot access '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/TempServerDir/lcm_*': No such file or directory
+/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/TempServerDir/lcm_process_core_*
+/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/TempServerDir/RunLCModel.sh: line 20: /ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/TempServerDir/lcm_process_core_*: No such file or directory
+
+
+8. Total Processing time of Part 1:  11005.555995812 
+
+
+
+
+8. Write the used sourcecode to out-dir.
+
+
+
+
+9. Remove unnecessary data!
+
+
+rm: cannot remove '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/spectra/*.RAW': No such file or directory
+rm: cannot remove '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/spectra/*.control': No such file or directory
+rm: cannot remove '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/water_spectra/*.RAW': No such file or directory
+rm: cannot remove '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/water_spectra/*.control': No such file or directory
+Stop tee.
+
+
+Terminate Program & Backup: 
+Copy logfile to /ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/Tumor_Patients/Tumor_Patients_2020/Tumor_Patient_079/3DCRT_64x64x39_NB_L_nCbC_2020-01-30/UsedSourcecode/logfile.log.
+
+y
+Stop now.
+

@@ -1,0 +1,21 @@
+create_magnitude.m:load([tmp_dir '/Parameters.mat'])
+create_mask.sh:		cp $T1w_path ${tmp_dir}/magnitude.mnc
+create_mask.sh~:		cp $T1w_path ./${tmp_dir}/magnitude.mnc
+create_mask_VOI.m:%clearvars -except tmp_dir; clear functions; close all;
+Create_MincTemplates.m:csi_template_fid = fopen([tmp_dir '/csi_template.raw'],'w');
+error_log:"/bilbo/usr/local/matlab2013a/bin/matlab -r tmp_dir = 'tmp1'; CurAvg=1; Paths = regexp(path,':','split');rmpathss = ~cellfun('isempty',strfind(Paths,'Matlab_Functions')); if(sum(rmpathss) > 0); x = strcat(Paths(rmpathss), {':'});x = [x{:}]; rmpath(x); end; clear Paths rmpathss x; addpath(genpath('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Sourcecode/MRSI_Processing_ReleaseVersions/Part1_Reco_LCModel_MUSICAL_newREAD_usedbyGilbert_v10/Matlab_Functions'))"
+ExtractBrain_mask.m:clearvars -except tmp_dir; close all;
+flip_mask.m:clearvars -except tmp_dir; close all;
+GetPar_CreateTempl_MaskPart1.m:clearvars -except tmp_dir
+GetPar_CreateTempl_MaskPart1.m~:clearvars -except tmp_dir
+Matlab_Functions/readNEW/read_csi_new.m:function [Noise,PreProcessingInfo,ReadInInfo,kSpace] = read_csi_new(file,tmp_dir,PreProcessingInfo,ReadInDataSets)
+Matlab_Functions/readNEW/read_csi_dat_new.m:function [kSpace, Info] = read_csi_dat_new(file, tmp_dir)
+MRSI_Reconstruction.m:clearvars -except tmp_dir
+MRSI_Reconstruction.m~:clearvars -except tmp_dir
+MRSI_Reconstruction_PI.m:load([tmp_dir '/Parameters.mat'])
+Part1_ProcessMRSI.sh:		cp $tmp_dir/ErrorFile.sh $out_path/UsedSourcecode
+Part1_ProcessMRSI.sh~:		cp $tmp_dir/ErrorFile.sh $out_path/UsedSourcecode
+readme.txt:1. Create tmp_dir
+RunLCModel.sh:tmp_dir=$2
+write_InitialParameters.sh:Par="${tmp_dir}/InitialParameters.m"
+write_InitialParameters.sh~:Par="${tmp_dir}/InitialParameters.m"

@@ -1,0 +1,343 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% LH,BS, 2016
+% function for rollercoaster reconstruction
+% includes:     - equidist circles w+w/o Origin
+%               - hamming circles w+w/o Origin
+% INPUT Notation:
+% Prep.ONLINE.NoFFT_flag = 1;[iSpace Noise SettingsInfo ReadInInfo kSpace] = read_csi('---.dat',Prep);
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Read In :Number of circles nc, vectorsize vs, resolution RES, number of samples ns
+%csi_k_p=csi_k_p(:,1:end-1,:,:,:);
+%nc=length((ReadInInfo.ONLINE.mdhInfo{1}(1,:,1,1,1,1,1,1,1,1,1)));
+function [csi_new,true_weights] = RollercoasterRecon_fast(totCoili,slicenmb,NumberOfLoopsPerSlice,ReadInInfo,nSlices,post_grd_dc_flag,conj_flag,NoOfTempInterleaves_vec,csi_k_p,true_weights)
+
+% 
+% a=zeros(nc,nc);
+% b=zeros(nc,nc);
+
+nc=NumberOfLoopsPerSlice(slicenmb);
+% i nummerates the numb of circles
+if(nSlices==1)
+    bla=0;
+else
+    cmsm=cumsum(NumberOfLoopsPerSlice);
+    bla=cmsm((nSlices-1)/2);
+end;
+    %+cmsm((nSlices-1)/2)
+for i=1:nc
+    a(i,:)=ReadInInfo.Data(1,i+bla) + ReadInInfo.Data(2,i+bla)/10000;%squeeze(ReadInInfo.ONLINE.mdhInfo{1}(1,i+bla,1,1,1,1,1,1,1,1,15))+squeeze(ReadInInfo.ONLINE.mdhInfo{1}(1,i+bla,1,1,1,1,1,1,1,1,16))/10000;
+    b(i,:)=ReadInInfo.Data(3,i+bla) + ReadInInfo.Data(4,i+bla)/10000;%squeeze(ReadInInfo.ONLINE.mdhInfo{1}(1,i+bla,1,1,1,1,1,1,1,1,17))+squeeze(ReadInInfo.ONLINE.mdhInfo{1}(1,i+bla,1,1,1,1,1,1,1,1,18))/10000;
+end;
+
+X=a(:,1);
+Y=b(:,1);
+
+vs=size(csi_k_p,5);
+
+% numb of samples (incl oversamp)
+ns=length(csi_k_p(1,1,:,1,1,1));
+
+%Resolution of cartesian grid
+
+if( ReadInInfo.Par.ReadLines > 2*max(NumberOfLoopsPerSlice(slicenmb)) )
+    RES=2*NumberOfLoopsPerSlice(slicenmb);	 % for natural (2D or 3D)
+    maxres=2*max(NumberOfLoopsPerSlice);
+else
+    RES=ReadInInfo.Par.ReadLines;    % for hamming (2D only)
+    maxres=RES;
+end
+%% Calculate Radii R and angles phi & check if we measure the circle center
+
+%calculate theoretical points on circles
+R=sqrt(X.^2+Y.^2);
+phi=atan2(Y,X);
+% R(1)= 53.3659;
+% phi(1)= 0.0064;
+%check if we sample center of origin or not
+% if R(1)==0 %this means we sample the origin
+%     phi(1)=0;
+% end;
+
+kx=zeros(ns,nc);
+ky=zeros(ns,nc);
+
+%% Calculate all points of the circles theoretically by only using the first point of the concept acquisition for each circle
+flipd_NoOfTempInterleaves_vec=fliplr(NoOfTempInterleaves_vec);
+for i=1:nc
+    for t=1:ns
+
+        kx(t,i)=R(i)*cos(2*pi*(t-1)/ns+phi(i)+0.1*0*2*pi*8/ns);
+        ky(t,i)=R(i)*sin(2*pi*(t-1)/ns+phi(i)+0.3*0*2*pi*8/ns);
+
+    end;
+end;
+
+%%empirical gradient delay correction !
+%%this results in a rotation (always) + distortion correction (if variable TIs are used)
+
+% 
+% 
+% for i=1:nc
+%         kx(:,i)=circshift(kx(:,i),flipd_NoOfTempInterleaves_vec(i)*33);
+%         ky(:,i)=circshift(ky(:,i),flipd_NoOfTempInterleaves_vec(i)*33);
+% end  
+
+%% this is needed for hamming acq
+REShalbe=RES/2;
+
+%% default of overgridding should be 4. this minimises the contributions of overlap-artifacts 
+
+fov_overgrid=2;
+
+%spectralnoncartesian_rolled_full=zeros([size(csi_k_p,1) size(csi_k_p,2) size(csi_k_p,3) size(csi_k_p,4) size(csi_k_p,5)]);
+
+
+
+%% FOV SHIFTs
+
+%Inplane FOV shift
+%kspace_max=sqrt(kx(1,end).^2+ky(1,end).^2);
+%yIPFOVshift=+ReadInInfo.Par.VoiPositionSag; %this should be right!
+%xIPFOVshift=-ReadInInfo.Par.VoiPositionCor;
+%FOV=ReadInInfo.Par.ReadFOV;
+
+
+%for circles=1:nc
+%   for samplepoint=1:ns
+%        csi_k_p(:,circles,samplepoint,1,:)=csi_k_p(:,circles,samplepoint,1,:)*exp(1i*kx(samplepoint,circles)/kspace_max*((REShalbe-0.5)/FOV)*2*pi*xIPFOVshift)*exp(1i*ky(samplepoint,circles)/kspace_max*((REShalbe-0.5)/FOV)*2*pi*yIPFOVshift);
+%    end
+%end
+
+
+%% FOV SHIFTs
+
+kspace_max=sqrt(kx(1,end).^2+ky(1,end).^2);
+LPH=[ReadInInfo.Par.VoiPositionCor ReadInInfo.Par.VoiPositionSag ReadInInfo.Par.VoiPositionTra];
+Normal1=[ReadInInfo.Par.SliceNormalVector_y ReadInInfo.Par.SliceNormalVector_x ReadInInfo.Par.SliceNormalVector_z];
+Normal2=[0 0 1];
+v=vrrotvec(Normal1,Normal2);
+Rot=vrrotvec2mat(v);
+PRS=Rot*LPH';
+FOVShift=squeeze(exp(1i*ky(:,:)/kspace_max/1*RES*pi*PRS(2)/ReadInInfo.Par.ReadFOV)).*squeeze(exp(1i*kx(:,:)/kspace_max/1*RES*pi*-PRS(1)/ReadInInfo.Par.ReadFOV));
+
+for circles=1:nc
+	for samplepoint=1:ns
+		csi_k_p(:,circles,samplepoint,1,:)=csi_k_p(:,circles,samplepoint,1,:)*FOVShift(samplepoint,circles);
+	end
+end 
+
+
+%% Perform a PHASEROLL ala B.G. This corrupts the first 2-3 vectorsice points and maybe also the last vs-points. this does only influence the lipid folding at vs=0 and vs=end
+
+
+
+% tic
+%if(conj_flag)
+% %     Normal Phaseroll
+%     for t=1:ns
+% 
+%         timeoffset=nTI*(t-1)/ns;
+%         phasecorr = reshape(exp(-2*1i*pi*timeoffset*((0:vs-1)/vs-0.5)),[1 1 vs]);
+%         for j=1:size(csi_k_p,1)
+%             for k=1:nc
+%                 kfaxis=squeeze_single_dim(squeeze_single_dim(csi_k_p(j,k,t,1,:),4),3);
+%                 kfaxis=fftshift(ifft(kfaxis,[],3),3);
+%                 kfaxis=conv(squeeze(kfaxis),ifftshift(ifft(ifftshift(squeeze(conj(phasecorr))))),'same');
+% 
+%                 kfaxis=kfaxis.*repmat(conj(phasecorr),[size(csi_k_p,1) nc 1]);
+%                 kfaxis=fft(fftshift(kfaxis,3),[],3);
+%                 csi_k_p(j,k,t,1,:)=kfaxis;
+%             end
+%         end
+%     end
+
+    
+    
+     % Normal Phaseroll
+%     for t=1:ns
+% 
+%         timeoffset=nTI*(t-1)/ns;
+%         phasecorr = reshape(exp(-2*1i*pi*timeoffset*((0:vs-1)/vs-0.5)),[1 1 vs]);
+% 
+% 
+%         kfaxis=squeeze_single_dim(squeeze_single_dim(csi_k_p(:,:,t,1,:),4),3);
+%         kfaxis=fftshift(ifft(kfaxis,[],3),3);
+%         kfaxis=kfaxis.*repmat(conj(phasecorr),[size(csi_k_p,1) nc 1]);
+%         kfaxis=fft(fftshift(kfaxis,3),[],3);
+%         csi_k_p(:,:,t,1,:)=kfaxis;
+% 
+%     end
+%end
+
+% Mirrored Phaseroll: The normal phaseroll destroys the first and last FID
+% points which is not so cool. If we mirror the FID and simulate that we
+% have a full echo, and then cut out the decaying part, those artifacts are
+% gone or much much better. In cases where the lipid artefact is convoluted
+% to the wrong side of the spectrum a freqshift is necessary. This shifts
+% the lipid to the correct position for proper phaserolling and after that back again.
+% For 3 TI this is not needed at a SBW=2778 Hz.
+% 
+% 
+% if(conj_flag)
+% for i=1:nc
+%     vs = vs*2;
+%     %csi_k_p(:,:,:,:,384:end) = 0;
+%     for samplepoint=1:ns
+% 
+%         PhaseRollDummy = csi_k_p(:,i,samplepoint,1,:);
+%         PhaseRollDummy = cat(5,zeros(size(PhaseRollDummy(:,:,:,:,end:-1:1))),PhaseRollDummy);
+% 
+%         timeoffset=NoOfTempInterleaves_vec(i)*(samplepoint-1)/ns; % 3 because of 3 TI. if 2 TI than 2 :)
+%         phasecorr = reshape(exp(-2*1i*pi*timeoffset*((freqshift:vs-1+freqshift)/vs-0.5)),[1 1 vs]);
+% 
+%         kfaxis=squeeze_single_dim(squeeze_single_dim(PhaseRollDummy(:,:,1,1,:),4),3);
+%         kfaxis=fftshift(ifft(fftshift(kfaxis,3),[],3),3);
+%         kfaxis=circshift(kfaxis,[0 0 -freqshift]);
+%         kfaxis=kfaxis.*repmat(conj(phasecorr),[size(csi_k_p,1) 1 1]);
+%         kfaxis=circshift(kfaxis,[0 0 freqshift]);
+%         kfaxis=fftshift(fft(fftshift(kfaxis,3),[],3),3);
+%         csi_k_p(:,i,samplepoint,1,:)=kfaxis(:,:,vs/2+1:end);    %#ok
+% 
+%     end
+% 
+%     clear kfaxis PhaseRollDummy timeoffset phasecorr
+%     vs = vs/2;
+% end
+% tic
+for i=1:nc
+    vs = vs*2;
+    %csi_k_p(:,:,:,:,384:end) = 0;
+   % for samplepoint=1:ns
+
+        PhaseRollDummy = csi_k_p(:,i,:,1,:);
+        PhaseRollDummy = cat(5,zeros(size(PhaseRollDummy(:,:,:,:,end:-1:1))),PhaseRollDummy);
+
+        timeoffset=NoOfTempInterleaves_vec(i)*((1:ns)-1)/ns; % 3 because of 3 TI. if 2 TI than 2 :)
+        phasecorr = reshape(exp(-2*1i*pi*timeoffset'*((0:vs-1)/vs-0.5)),[1 ns vs]);
+
+        kfaxis=squeeze_single_dim(PhaseRollDummy(:,:,:,1,:),4);
+        kfaxis=fftshift(ifft(fftshift(kfaxis,4),[],4),4);
+        %kfaxis=circshift(kfaxis,[0 0 -freqshift]);
+        kfaxis=kfaxis.*permute(repmat(conj(phasecorr),[1 1 1 totCoili]),[4 1 2 3]);
+        %kfaxis=circshift(kfaxis,[0 0 freqshift]);
+        kfaxis=fftshift(fft(fftshift(kfaxis,4),[],4),4);
+        csi_k_p(:,i,:,1,:)=kfaxis(:,:,:,vs/2+1:end);    
+
+    %end
+
+    clear kfaxis PhaseRollDummy timeoffset phasecorr
+    vs = vs/2;
+end
+% end
+% 
+% vs=vs-3;
+% 
+% csi_k_p=csi_k_p(:,:,:,:,4:end);
+% 
+% vs=vs-3;
+% 
+% csi_k_p=csi_k_p(:,:,:,:,1:end-3);
+
+% fprintf('Phaseroll took %d s',toc)
+%spectralnoncartesian_rolled_full = csi_k_p;
+
+
+
+
+
+
+  
+%% Calculate a 'theoretical' Density Compensation function. check if hamming or natural for DCF:
+
+% if nc>RES/2
+%     dcf=ones(length(reshape(squeeze(csi_k_p(1,1:nc,:,1,1)),[1 nc*ns])),1);
+% % else
+% for i=2:nc-1
+%     dcf1(i)=((R(i)/max(R)+R(i+1)/max(R))^2/4-(R(i-1)/max(R)+R(i)/max(R))^2/4)^(1)*pi;
+% end;    
+% dcf1(1)=(0.25*pi*(R(1)/max(R)+R(2)/max(R))^2);    
+% dcf1(nc)=pi*((1.5*R(nc)/max(R)-0.5*R(nc-1)/max(R))^2-(0.5*R(nc)/max(R)+0.5*R(nc-1)/max(R))^2);
+% dcf = reshape(transpose(repmat(dcf1,[ns 1])),[ns*nc 1]);
+% % end;
+
+nsamp=zeros(2,ns*nc);
+nsamp(1,:)=transpose(reshape((kx./max(R)/2),[nc*ns 1]));
+nsamp(2,:)=transpose(reshape((ky./max(R)/2),[nc*ns 1]));
+[H,APF,DCF] = gridOperator(nSlices,slicenmb,nsamp,fov_overgrid*2*(REShalbe-1),1);
+
+hamm2grd=HammingFilter(ones([fov_overgrid*2*(REShalbe-1), fov_overgrid*2*(REShalbe-1)]),[1 2]);
+hamm2grd=permute(repmat(hamm2grd,[1 1 totCoili]),[3 1 2]);
+%% Start Reconstruction using Brian Hargreaves script
+
+%csi_k_gridded=zeros(size_csi(1),fov_overgrid*(2*REShalbe-1),fov_overgrid*(2*REShalbe-1),size_csi(4),vs,precision);
+csi_k_smalldummy=zeros(totCoili,nc*ns);
+%csi = feval(precision,csi_k_p);
+csi_new=zeros([size(csi_k_p,1), maxres, maxres, size(csi_k_p,4), vs],'single');
+% tic
+% fprintf('\nGRIDDING AND FFT of ALL channels...')
+for j=1:vs
+
+    if(post_grd_dc_flag)
+        csi_k_smalldummy(:,:)=reshape(squeeze(ones([totCoili, nc, size(csi_k_p,3), 1, 1])),[totCoili nc*ns]);
+    else
+        csi_k_smalldummy(:,:)=reshape(permute((csi_k_p(:,1:nc,:,1,j)),[1 3 2]),[totCoili nc*ns]);
+    end
+
+    %[dat,kbku,kbkval]  = gridkb(reshape(transpose(kx./max(R)/2+1i*ky./max(R)/2),[nc*ns 1]),transpose(csi_k_smalldummy(j,:)),dcf/max(dcf),fov_overgrid*(2*REShalbe-1),2,1);
+    dat=permute(reshape(H'*(transpose((csi_k_smalldummy(:,:))).*repmat(DCF(:),[1 totCoili])),[fov_overgrid*2*(REShalbe-1), fov_overgrid*2*(REShalbe-1),totCoili]),[3 2 1]);
+
+    %add all slices to make it 3d in k domain
+    %csi_k_gridded(cha,:,:,1,j)=dat;
+
+     %.*DCF(:)
+
+    if(post_grd_dc_flag) %natural and ham
+         true_weights=real(dat)./hamm2grd; % calc the weights for post grd dens-comp
+         true_weights(true_weights==inf)=1; %it seems that we regrid on values!=0 where the hamming filter is definded as 0--> const/0 =inf
+         true_weights(isnan(true_weights))=1; %set NaN outside of spherical k space region to zero
+         true_weights(true_weights==0)=1;
+         break;
+    end
+
+    if(post_grd_dc_flag==0) %apply weights
+         dat=dat./true_weights; % post-grd-dens-comp
+         dat(isnan(dat))=0; %set NaN outside of speherical k-space region to zero
+         dat(dat==inf)=0;
+    end    
+
+    %dat = csi(cha,:,:,:,j);                           % This extra assignment proved to be faster than using always csi(cha,:,:,:,:). Seems that indexing is rather slow.
+
+    dat = ifftshift(ifftshift(dat,2),3);
+    dat = fft(fft(dat,[],2),[],3);
+%         if(conj_flag)
+%            dat = conj(dat);                            % the chem shift gets higher from right to left --> conj reverses that
+%         end
+    dat = fftshift(fftshift(dat,2),3).*permute(repmat(APF,[1 1 totCoili]),[3 1 2]);
+    dat = flipdim(dat,2); 
+
+    dat=ZerofillOrCutkSpace(dat,[totCoili 2*REShalbe*fov_overgrid 2*REShalbe*fov_overgrid],1);
+
+    dat = dat(:,fov_overgrid*2*REShalbe/2-2*REShalbe/2+1:fov_overgrid*2*REShalbe/2+2*REShalbe/2,fov_overgrid*2*REShalbe/2-2*REShalbe/2+1:fov_overgrid*2*REShalbe/2+2*REShalbe/2);
+
+    %for stacking up spherical 3D circels:
+    dat=ZerofillOrCutkSpace(dat,[totCoili maxres maxres],1);
+
+    csi_new(:,:,:,1,j)=dat;
+
+end;
+
+%for musical
+if (~conj_flag && ~post_grd_dc_flag)
+    csi_new=csi_new(:,:,:,1,4);
+end    
+% fprintf('\nOverall FFT Process\t\t...\ttook\t%10.6f seconds\n\n', toc)
+
+
+% csi_k_p = csi_k_p(:,:,:,:,1);	% Dont need that anymore, only for plotting
+
+clear dat csi_k_smalldummy;
+
+end

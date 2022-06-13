@@ -1,0 +1,31 @@
+script_temp_meas_reco_x_y:
+
+
+CHANGED IN VERSION 1.0 - 1.1
+
+?? ????? 2011
+
+- ???
+
+
+
+
+
+
+
+
+
+
+CHANGED IN VERSION 1.2:
+
+
+-	(2013)	Don't use the phase_cor_autom_1 anymore for the metabolite spectra after the eddy current correction, because the eddy current correction does nothing than phasing the signal with 
+			some SVD analysis of the water data, which is very robust. And then it would be phased just according to the low-amplitude water suppressed NAA (?) peak, which will more dephase than
+			properly phase the signal.
+
+
+
+
+
+
+

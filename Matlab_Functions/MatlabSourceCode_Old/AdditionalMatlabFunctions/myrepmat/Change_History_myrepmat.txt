@@ -1,0 +1,20 @@
+Until June 5, 2012:
+
+Wrote function that can replicate arrays also at beginning. E.g. it can replicate a [64 64] array to [32 64 64], where the MATLAB repmat
+function creates a [32*64 64] = [2048 64] matrix
+
+
+CHANGED IN VERSION 1.1:
+
+June 5 2012
+
+
+
+
+
+TODO: 
+
+-	Find better names for the variables ReplicationStartIndexInDesiredSize and ReplicationEndIndexInDesiredSize
+
+
+
