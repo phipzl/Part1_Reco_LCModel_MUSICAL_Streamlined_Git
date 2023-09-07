@@ -182,7 +182,11 @@ end
     
 % Save first FID point of aliased images
 if(SliceParallelImaging_SimulationFlag || TwoDCaipParallelImaging_SimulationFlag)
+    if(TwoDCaipParallelImaging_SimulationFlag)
 	csi_k_skipped_ForPlotting = csi_k_skipped(:,:,:,:,1,1);
+    else
+        csi_k_skipped_ForPlotting = csi_k(:,:,:,:,1,1);        
+    end
 	csi_skipped_ForPlotting = flipdim(fftshift(fftshift(conj(fft(fft(ifftshift(ifftshift(csi_k_skipped_ForPlotting,2),3),[],2),[],3)),2),3),2);
 	csi_skipped_ForPlotting = sqrt(sum(abs(csi_skipped_ForPlotting).^2));
 	csi_k_skipped_ForPlotting = csi_k_skipped_ForPlotting(1,:,:,:);
@@ -493,6 +497,11 @@ end
 
 % kSpace Patterns
 if(Par.Flags.TwoDCaipParallelImaging_flag)
+    
+    InPlaneCaipPattern = Par.Settings.InPlaneCaipPattern;
+    MeasuredMask = squeeze(logical(abs(csi_k_meas(1,:,:,1,1))));
+    save(sprintf('%s/ParallelImaging/PIInfo.mat', Par.Paths.out_path),'InPlaneCaipPattern','MeasuredMask','MeasuredkPoints_VD','MeasuredkPoints_BothUndersampled','MeasuredkPoints_FullySampled');
+    clear InPlaneCaipPattern MeasuredMask
     
     UndersamplingPattern_fig = figure('visible','off');
     imagesc(Par.Settings.InPlaneCaipPattern)

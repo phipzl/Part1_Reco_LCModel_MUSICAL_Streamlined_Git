@@ -15,7 +15,8 @@
 # aliases
 
 # MATLAB 
-export matlabp='/bilbo/usr/local/matlab2013a/bin/matlab'
+#export matlabp='/usr/local/matlab78/bin/matlab'
+export matlabp='/bilbo/usr/local/matlab2017b/bin/matlab'
 
 # Brain extraction tool (bet)
 export betp='/usr/local/fsl/bin/bet'
@@ -25,13 +26,16 @@ export betp='/usr/local/fsl/bin/bet'
 
 # MATLAB Functions Folder
 LocalMatDir=`pwd`
-if [ -d $LocalMatDir/Matlab_Functions ]; then
-	export MatlabFunctionsFolder="$LocalMatDir/Matlab_Functions"
+if [ -d $LocalMatDir/MatlabFunctions ]; then
+	export MatlabFunctionsFolder="$LocalMatDir/MatlabFunctions"
 else
-	export MatlabFunctionsFolder="$LocalMatDir/Matlab_Functions" #changed bstrasser to lhingerl for concept
+	export MatlabFunctionsFolder="$LocalMatDir/MatlabFunctions" #changed bstrasser to lhingerl for concept
 fi
-MatlabStartupCommand="Paths = regexp(path,':','split');rmpathss = ~cellfun('isempty',strfind(Paths,'Matlab_Functions')); if(sum(rmpathss) > 0);"
+MatlabStartupCommand="Paths = regexp(path,':','split');rmpathss = ~cellfun('isempty',strfind(Paths,'MatlabFunctions')); if(sum(rmpathss) > 0);"
 export MatlabStartupCommand="${MatlabStartupCommand} x = strcat(Paths(rmpathss), {':'});x = [x{:}]; rmpath(x); end; clear Paths rmpathss x; addpath(genpath('${MatlabFunctionsFolder}'))"
+
+# tmp-folder
+tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
 
 
 # LCModel Path

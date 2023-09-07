@@ -1,12 +1,14 @@
 RunLCModelOn=$1
 tmp_dir=$2
 
+# Allow either $CurrentComputer or $RunLCModelOn to include a domain name like ".nmr.meduniwien.ac.at" 
 CurrentComputer=$(hostname)
-if ! [[ $CurrentComputer == $RunLCModelOn ]]; then
+Search1=$(echo $CurrentComputer | grep -c "${RunLCModelOn}\.")
+Search2=$(echo $RunLCModelOn | grep -c "${CurrentComputer}\.")
+if ! ( [[ $CurrentComputer == $RunLCModelOn ]] || [[ $Search1 > 0 ]]  || [[ $Search2 > 0 ]] ); then
 	echo -e "\nThere seems to be a problem to ssh to computer $RunLCModelOn."
 	echo -e"Did you forget to take your meds? Or did you forget to provide a key, so that ssh is possible without password authentication?"
 fi
-
 
 echo -e "\n\n7. LCmodel processing started!\n\n"
 chmod 755 ${tmp_dir}/lcm_*

@@ -15,9 +15,21 @@ load([tmp_dir '/Parameters.mat'])
 
 
 
+FileList = {[tmp_dir '/mask_brain.raw']};
+Sizes = {[Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]};
+FileList{2} = [tmp_dir '/mask_brain_zf.raw'];
+if(Par.CSI.ThreeD_flag)
+    Sizes{2} = [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC] * Par.Settings.ZeroFillMetMaps;
+else
+    Sizes{2} = [Par.CSI.nFreqEnc*Par.Settings.ZeroFillMetMaps Par.CSI.nPhasEnc*Par.Settings.ZeroFillMetMaps Par.CSI.nPartEnc*Par.CSI.nSLC];
+end
+if(isfield(Par.CSI,'nPhasEnc_BefInterpol'))
+    FileList{3} = [tmp_dir '/mask_brain_BefInterpol.raw'];
+    Sizes{3} = [Par.CSI.nFreqEnc_BefInterpol Par.CSI.nPhasEnc_BefInterpol Par.CSI.nPartEnc_BefInterpol*Par.CSI.nSLC_BefInterpol];
+end
 
-for CurFile = {[tmp_dir '/mask_brain.raw'],[tmp_dir '/mask_brain_BefInterpol.raw']}
-	CurFile2 = Curfile{:};
+for ii = 1:numel(Sizes)
+	CurFile2 = FileList{ii};
 	if(~exist(CurFile2,'file'))
 		continue
 	end
@@ -28,8 +40,8 @@ for CurFile = {[tmp_dir '/mask_brain.raw'],[tmp_dir '/mask_brain_BefInterpol.raw
 	% for Slice_no = 1:SLC
 	%     mask(:,:,Slice_no) = fread(fid, [ROW,COL], 'float');
 	% end
-	mask = reshape(fread(fid, 'float'), [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
-
+	mask = fread(fid, 'float');
+        mask = reshape(mask, Sizes{ii});
 	fclose(fid);
 
 
@@ -40,8 +52,11 @@ for CurFile = {[tmp_dir '/mask_brain.raw'],[tmp_dir '/mask_brain_BefInterpol.raw
 		dummy = bwconncomp(mask(:,:,slc),4);
 		dummy = dummy.PixelIdxList(max(cellfun(@numel,dummy.PixelIdxList)) == cellfun(@numel,dummy.PixelIdxList));
 		mask2_dum = mask2(:,:,slc);
-		mask2_dum(dummy{:}) = 1;
+        mask2_dum([dummy{:}]) = 1;
+        if(any(mask2_dum(:))>0)
+            mask2_dum = imfill(mask2_dum);          % Fill in all holes
 		mask2(:,:,slc) = mask2_dum;
+        end
 	end
 
 	%% 3. WRITE DATA AS .RAW-FILES

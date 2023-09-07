@@ -67,7 +67,7 @@ ErrorFile = fopen([tmp_dir '/ErrorFile.sh'],'w+');
 
 % 2.2 LCModel_Control file
 if(isfield(Par.Paths,'LCM_ControlPath'))
-    eval(['run ' Par.Paths.LCM_ControlPath]);
+    run(Par.Paths.LCM_ControlPath);
     Par.LCMControl = ControlWrite;
 end
 
@@ -76,7 +76,7 @@ clearvars -except tmp_dir Par ErrorFile
 
 % Write LCM Control file for water dataset
 if(isfield(Par.Paths,'LCM_Control_Water_path'))
-    eval(['run ' Par.Paths.LCM_Control_Water_path]);
+    run(Par.Paths.LCM_Control_Water_path);
     Par.LCMControl_Water = ControlWrite;
 end
 
@@ -92,37 +92,52 @@ else
 	Par.Flags.noisedecorr_UseCSINoise_flag = 0;
 end
 
-% if(Par.Flags.LipidDecon_flag == 1)
-% 	% L1 or L2 ?
-% 	Par.Flags.LipidDecon_L1_flag = ~isempty(regexp(Par.Settings.LipidDecon_MethodAndNoOfLoops,'L1','ONCE'));
-% 	dummy = regexp(Par.Settings.LipidDecon_MethodAndNoOfLoops,',[0-9]*\.?[0-9]*','match');
-% 	if(Par.Flags.LipidDecon_L1_flag)
-% 		if(isempty(dummy))
-% 			Par.Settings.LipidDecon_NoOfLoops = 10;
-% 		else
-% 			Par.Settings.LipidDecon_NoOfLoops = str2double(dummy{1}(2:end));			
-% 		end
-% 	else
-% 		if(isempty(dummy))
-% 			Par.Settings.LipidDecon_L2BetaCorrFactor = 1;
-% 		else
-% 			Par.Settings.LipidDecon_L2BetaCorrFactor = str2double(dummy{1}(2:end));
-% 		end
-% 	end
-% end
-
 if(Par.Flags.LipidDecon_flag == 1)
-	dummy = regexp(Par.Settings.LipidDecon_L2BetaCorrFactor,',','split');
-    dummy_factor = dummy(end);
-    if(isempty(dummy_factor))
-        Par.Settings.LipidDecon_L2BetaCorrFactor = 1;
-    else
-        Par.Settings.LipidDecon_L2BetaCorrFactor = str2double(dummy_factor{1}(2:end));
+	% L1 or L2 ?
+	Par.Flags.LipidDecon_L1_flag = ~isempty(regexp(Par.Settings.LipidDecon_MethodAndNoOfLoops,'L1','ONCE'));
+	dummy = regexp(Par.Settings.LipidDecon_MethodAndNoOfLoops,',[0-9]*\.?[0-9]*','match');
+	if(Par.Flags.LipidDecon_L1_flag)
+		if(isempty(dummy))
+			Par.Settings.LipidDecon_NoOfLoops = 10;
+		else
+			Par.Settings.LipidDecon_NoOfLoops = str2double(dummy{1}(2:end));			
+		end
+	else
+		if(isempty(dummy))
+			Par.Settings.LipidDecon_L2BetaCorrFactor = 1;
+		else
+			Par.Settings.LipidDecon_L2BetaCorrFactor = str2double(dummy{1}(2:end));
+		end
+	end
+end
+
+
+Par.Flags.ESPIRiT_flag = false;
+if(Par.Flags.image_normal_flag)
+    if(~isempty(regexpi(Par.Paths.image_normal_path{1},'espirit,','match')))
+        Par.Flags.ESPIRiT_flag = true;
+        Par.Paths.image_normal_path{1} = regexprep(Par.Paths.image_normal_path{1},'espirit,','','ignorecase');
     end
+    % If we want to do ESPIRiT with MUSICAL
+    if(isempty(Par.Paths.image_normal_path{1}))
+        Par.Flags.image_normal_flag = false;
+        Par.Paths = rmfield(Par.Paths,'image_normal_path');
+	end
 end
 
 Par.Flags.zerofill_to_nextpow2_flag = false;
 if(Par.Flags.InterpolateCSIResolution_flag == 1)
+    
+    Par.Settings.InterpolateCSIResolution_InkSpace = false;
+    if(~isempty(regexpi(Par.Settings.InterpolateCSIResolution,'kspace','match')))
+        Par.Settings.InterpolateCSIResolution_InkSpace = true;
+        Par.Settings.InterpolateCSIResolution_EllipFilter = false;
+        if(~isempty(regexpi(Par.Settings.InterpolateCSIResolution,'Ellip','match')))
+            Par.Settings.InterpolateCSIResolution_EllipFilter = true;
+        end
+    end
+
+    
 	Par.Flags.zerofill_to_nextpow2_flag = ~isempty(regexp(Par.Settings.InterpolateCSIResolution,'nextpow','ONCE'));
 	dummy = regexp(Par.Settings.InterpolateCSIResolution,'\[[\d\s,;.]*\]','match');
 	try
@@ -135,7 +150,7 @@ else
 	Par.Settings.InterpolateCSIResolution = [0 0 0];
 end
 %% Water Reference Processing
-fprintf('\n\nWater Reference Processing\n');
+fprintf('\n\nDetermine if and which Water Reference Processing should be done...\n');
 
 if(Par.Flags.WaterReference_flag == 1)
     dummy = char(strtrim(regexp(Par.Settings.WaterReference_MethodAndFile,'[^,]*$','match')));
@@ -183,6 +198,7 @@ end
 TestLocal = setdiff(fields_files,TestOnServer(1:end-1));
 
 % Test for existence
+fprintf('\n\nTest if folders exist locally and on server via %s.\nIF PROGRAM STOPS HERE, THE ssh CONNECTION IS NOT WORKING WITH AUTO-LOGIN!\n\n',ServerSSH)
 if(~TestForPathExistence(Par.Paths,0,TestLocal,ServerSSH,TestOnServer))
 	fprintf(ErrorFile,'ErrorInGetPar_CreateTempl=1; ErrorMessage=''Input path not existing.''');
 	fclose(ErrorFile);
@@ -211,42 +227,34 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
     else
         fprintf('\n\nParameters.mat are being created.\n\n')
     end
-    %csiPars = read_ascconv(Par.Paths.csi_path{1});		% New function which is adapted to VE11. If some bug occurs, search here.
-    inData=mapVBVD(Par.Paths.csi_path{1});
-    if(size(inData,2)==2)
-        inData=inData{2};
-    end
-    
+    csiPars = read_ascconv(Par.Paths.csi_path{1});		% New function which is adapted to VE11. If some bug occurs, search here.
 	% Total Channel Number
-	 if(strcmpi(inData.image.softwareVersion,'vd'))
-         csiPars.total_channel_no = numel(inData.hdr.MeasYaps.sCoilSelectMeas.aRxCoilSelectData{1}.asList);
-     end
+	csiPars.total_channel_no = csiPars.total_channel_no_reco; csiPars = rmfield(csiPars,{'total_channel_no_measured','total_channel_no_reco'});
      
-     if(strcmpi(inData.image.softwareVersion,'vb'))
-        csiPars.total_channel_no = numel(inData.hdr.MeasYaps.asCoilSelectMeas{1}.asList);
-     end
 
-    for i = 1 : size(inData.hdr.MeasYaps.alTE,2)
-        csiPars.TEs(i)=inData.hdr.MeasYaps.alTE{i};
+    % DICOM is always zerofilled to next power of 2.
+	if(Par.Flags.zerofill_to_nextpow2_flag || numel(strfind(Par.Paths.csi_path{1}, '.IMA')) > 0)
+		csiPars.nFreqEnc = csiPars.nFreqEnc_FinalMatrix;
+		csiPars.nPhasEnc = csiPars.nPhasEnc_FinalMatrix;    
+		if(csiPars.ThreeD_flag)
+			csiPars.nPartEnc = csiPars.nSLC_FinalMatrix;    % Only in ThreeD Case we have to change that.
+		end
     end
     
-    csiPars.nFreqEnc = inData.hdr.Config.PhaseEncodingLines;
-    csiPars.nPhasEnc = inData.hdr.Config.PhaseEncodingLines;
-    csiPars.nPartEnc = inData.hdr.Spice.Partitions;
-    csiPars.nSLC = 1;
+    
 	% Define Matrix Size	
 	dummy = [csiPars.nFreqEnc csiPars.nPhasEnc csiPars.nPartEnc*csiPars.nSLC];
 	
 	Par.Settings.InterpolateCSIResolution(Par.Settings.InterpolateCSIResolution == [0 0 0]) = dummy(Par.Settings.InterpolateCSIResolution == [0 0 0]);
 	Par.Settings.InterpolateResolutionRatio = [csiPars.nFreqEnc csiPars.nPhasEnc csiPars.nPartEnc*csiPars.nSLC] ./ Par.Settings.InterpolateCSIResolution;
 	
-	if(sum(Par.Settings.InterpolateResolutionRatio > 1) >= 1 && ~Par.Flags.AlignFrequency_flag)
-		fprintf('\n\nWarning: Some spectra will be summed, but no frequency alignment was requested. I set AlignFrequency_flag = true.\n\n')
-		Par.Flags.AlignFrequency_flag = true;
+	if(sum(Par.Settings.InterpolateResolutionRatio > 1) >= 1 && ~Par.Settings.InterpolateCSIResolution_InkSpace && ~Par.Flags.AlignFreq_flag)
+		fprintf('\n\nWarning: Some spectra will be summed, but no frequency alignment was requested. I set AlignFreq_flag = true.\n\n')
+		Par.Flags.AlignFreq_flag = true;
 	end
-	if(numel(Par.Paths.csi_path) > 1 && ~Par.Flags.AlignFrequency_flag)
-		fprintf('\n\nWarning: Perform averaging of several csi data sets, but no frequency alignment was requested. I set AlignFrequency_flag = true.\n\n')
-		Par.Flags.AlignFrequency_flag = true;
+	if(numel(Par.Paths.csi_path) > 1 && ~Par.Flags.AlignFreq_flag)
+		fprintf('\n\nWarning: Perform averaging of several csi data sets, but no frequency alignment was requested. I set AlignFreq_flag = true.\n\n')
+		Par.Flags.AlignFreq_flag = true;
 	end	
 	
 	
@@ -258,51 +266,29 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 	csiPars.nFreqEnc_nonzf = csiPars.nFreqEnc * Par.Settings.InterpolateResolutionRatio(1);
 	csiPars.nPhasEnc_nonzf = csiPars.nPhasEnc * Par.Settings.InterpolateResolutionRatio(2);
 	csiPars.nPartEnc_nonzf = csiPars.nPartEnc * Par.Settings.InterpolateResolutionRatio(3);
-	csiPars.nFreqEnc_FinalMatrix = csiPars.nFreqEnc / Par.Settings.InterpolateResolutionRatio(1);
-	csiPars.nPhasEnc_FinalMatrix = csiPars.nPhasEnc / Par.Settings.InterpolateResolutionRatio(2);
-	csiPars.nSLC_FinalMatrix = csiPars.nSLC / Par.Settings.InterpolateResolutionRatio(3);
+	csiPars.nFreqEnc_FinalMatrix = csiPars.nFreqEnc_FinalMatrix / Par.Settings.InterpolateResolutionRatio(1);
+	csiPars.nPhasEnc_FinalMatrix = csiPars.nPhasEnc_FinalMatrix / Par.Settings.InterpolateResolutionRatio(2);
+	csiPars.nSLC_FinalMatrix = csiPars.nSLC_FinalMatrix / Par.Settings.InterpolateResolutionRatio(3);
 	
 	
 
 	
-	% DICOM is always zerofilled to next power of 2.
-	if(Par.Flags.zerofill_to_nextpow2_flag || numel(strfind(Par.Paths.csi_path{1}, '.IMA')) > 0)
-		csiPars.nFreqEnc = csiPars.nFreqEnc_FinalMatrix;
-		csiPars.nPhasEnc = csiPars.nPhasEnc_FinalMatrix;    
-		if(csiPars.ThreeD_flag)
-			csiPars.nPartEnc = csiPars.nSLC_FinalMatrix;    % Only in ThreeD Case we have to change that.
-		end
-	end
 	%csiPars.nFreqEnc = csiPars.nFreqEnc *2;        uncomment if zerofill wanted
 	%csiPars.nPhasEnc = csiPars.nPhasEnc *2;
-    csiPars.ThreeD_flag=0;
-    if(csiPars.nSLC>1)
-        csiPars.ThreeD_flag=1;
-    end
 	csiPars = rmfield(csiPars,{'nFreqEnc_FinalMatrix','nPhasEnc_FinalMatrix','nSLC_FinalMatrix' });
 	if(~csiPars.ThreeD_flag && numel(strfind(Par.Paths.csi_path{1}, '.IMA')) > 0)
 		csiPars.nSLC = 1;
     end
-
-    
-    csiPars.FoV_Read = inData.hdr.Config.PhaseFoV;
-    csiPars.FoV_Phase = inData.hdr.Config.PhaseFoV;
-    
-    csiPars.FoV_Partition =  inData.hdr.MeasYaps.sSliceArray.asSlice{1}.dThickness;
-    csiPars.VoI_Partition =  inData.hdr.Phoenix.sSpecPara.sVoI.dThickness;
-
-    if(csiPars.nSLC==1 && csiPars.nPartEnc==1)
-        % Stepsize (Voxel Size)%lukas master hack (acc to stano)
-        csiPars.StepRead = -csiPars.FoV_Read(1) / csiPars.nFreqEnc;		% Coordinate system is reversed in minc with respect to DICOM
-        csiPars.StepPhase = -csiPars.FoV_Phase(1) / csiPars.nPhasEnc;    
-        csiPars.StepSlice = csiPars.VoI_Partition(1) / (csiPars.nPartEnc * csiPars.nSLC); 
-    else
         
         % Stepsize (Voxel Size)
         csiPars.StepRead = -csiPars.FoV_Read(1) / csiPars.nFreqEnc;		% Coordinate system is reversed in minc with respect to DICOM
         csiPars.StepPhase = -csiPars.FoV_Phase(1) / csiPars.nPhasEnc;    
-        csiPars.StepSlice = csiPars.FoV_Partition(1) / (csiPars.nPartEnc * csiPars.nSLC); 
+    if(csiPars.nPartEnc == 1)
+        csiPars.FoV_Partition(1) = csiPars.VoI_Partition(1);
     end
+        csiPars.StepSlice = csiPars.FoV_Partition(1) / (csiPars.nPartEnc * csiPars.nSLC); 
+
+	
 	
 	if(~isfield(Par,'Settings') || ~isfield(Par.Settings,'ZeroFillMetMaps'))
 		Par.Settings.ZeroFillMetMaps = 4;
@@ -318,48 +304,19 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 		csiPars.StepSlice_zf = csiPars.StepSlice;
 	end
 
-    csiPars.Pos_Tra = inData.image.slicePos(3,1);
-    csiPars.Pos_Sag = inData.image.slicePos(1,1);
-    csiPars.Pos_Cor = inData.image.slicePos(2,1);
+
 	% Rename Position Fields
 	[csiPars.POS_X] = csiPars.Pos_Sag;
 	[csiPars.POS_Y] = csiPars.Pos_Cor;
 	[csiPars.POS_Z] = csiPars.Pos_Tra;
-    csiPars.PosVOI_Sag = csiPars.Pos_Sag;
-    csiPars.PosVOI_Cor = csiPars.Pos_Cor;
-    csiPars.PosVOI_Tra = csiPars.Pos_Tra;
-    csiPars.SliceGap = 0;
-    csiPars.SliceThickness = csiPars.FoV_Partition;
-    
 	csiPars = rmfield(csiPars,{'Pos_Sag','Pos_Cor','Pos_Tra'});
 
-    csiPars.SliceNormalVector_x(1)=0;
-    if(isfield(inData.hdr.Phoenix.sSpecPara.sVoI.sNormal,'dSag'))
-        csiPars.SliceNormalVector_x(1)=inData.hdr.Phoenix.sSpecPara.sVoI.sNormal.dSag;
-    end
-    
-    csiPars.SliceNormalVector_y(1)=0;
-    if(isfield(inData.hdr.Phoenix.sSpecPara.sVoI.sNormal,'dCor'))
-        csiPars.SliceNormalVector_y(1)=inData.hdr.Phoenix.sSpecPara.sVoI.sNormal.dCor;
-    end
-    
-    csiPars.SliceNormalVector_z(1)=0;
-    if(isfield(inData.hdr.Phoenix.sSpecPara.sVoI.sNormal,'dTra'))
-        csiPars.SliceNormalVector_z(1)=inData.hdr.Phoenix.sSpecPara.sVoI.sNormal.dTra;
-    end
-    
-    csiPars.InPlaneRotation=0;
-    csiPars.InPlaneRotation_VOI=0;
-    if(~isempty(inData.hdr.Spice.VoiInPlaneRot))
-       csiPars.InPlaneRotation = inData.hdr.Spice.VoiInPlaneRot; 
-       csiPars.InPlaneRotation_VOI = inData.hdr.Spice.VoiInPlaneRot; 
-    end
-        
-    csiPars.InPlaneRotation=csiPars.InPlaneRotation-0.1;
-    csiPars.InPlaneRotation_VOI=csiPars.InPlaneRotation_VOI-0.1;
+        % Only for CRT?   
+        csiPars.InPlaneRotation=csiPars.InPlaneRotation-0.1;
+        csiPars.InPlaneRotation_VOI=csiPars.InPlaneRotation_VOI-0.1;
 
 	% Compute direction cosine from x,y and z components of slice normal vector
-	[csiPars.PhaseNormalVector, csiPars.ReadNormalVector] = compute_dircos_1_3([csiPars.SliceNormalVector_x(1) csiPars.SliceNormalVector_y(1) csiPars.SliceNormalVector_z(1)],csiPars.InPlaneRotation);
+	[csiPars.PhaseNormalVector, csiPars.ReadNormalVector] = compute_dircos([csiPars.SliceNormalVector_x(1) csiPars.SliceNormalVector_y(1) csiPars.SliceNormalVector_z(1)],csiPars.InPlaneRotation);
 	csiPars.SliceNormalVector = [csiPars.SliceNormalVector_x(1) csiPars.SliceNormalVector_y(1) csiPars.SliceNormalVector_z(1)];    
 
 	MinusVec1 = [-1 -1 1];        % MinusVec are here only for "tuning" signs of the final rotation matrix (RotMat). The values of MinusVecs are 
@@ -383,7 +340,15 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 	% This approach is probably prone to extreme rotation of FOV and is not
 	% universal, however for the tested datasets it yielded correct results
 	Pos_Minc = RotMat * transpose(Pos); 
-	FoVHalf = [csiPars.FoV_Read(1)/2 csiPars.FoV_Phase(1)/2 -csiPars.FoV_Partition(1)/csiPars.nPartEnc*(csiPars.nPartEnc-1)/2];
+	% The following line is old, and I think wrong. What I think happened is: Michal fixed the shift
+	% in the z-direction by half a voxel with the line below (effectively this line calculates
+	% Pos_z - FoV_z/2 + FoV_z/(2*N_z). Then I figured out that the x- and y-positions have to be
+	% shifted by half a voxel, and thought by analogy also the z-dimension has to be shifted, not
+	% knowing that Michal did that already with the FoVHalf. Now it should be fixed:
+	% The FoVHalf is defined "normally" also for z, and the half-voxel shift is done in the 3D-case.
+	% For checks: See git commits #1383, #004f, #a9be
+% 	FoVHalf = [csiPars.FoV_Read(1)/2 csiPars.FoV_Phase(1)/2 -csiPars.FoV_Partition(1)/csiPars.nPartEnc*(csiPars.nPartEnc-1)/2]; 
+    FoVHalf = [csiPars.FoV_Read(1)/2 csiPars.FoV_Phase(1)/2 -csiPars.FoV_Partition(1)/2];  
 	Pos_Minc = transpose(Pos_Minc) + FoVHalf;
 
 	% Get from Center of Voxel (DICOM) to corner of voxel (minc) by subtracting half the voxel 
@@ -409,8 +374,8 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 		csiPars.StepPhase_BefInterpol = -csiPars.FoV_Phase(1) / csiPars.nPhasEnc_BefInterpol;    
 		csiPars.StepSlice_BefInterpol = csiPars.FoV_Partition(1) / (csiPars.nPartEnc_BefInterpol * csiPars.nSLC_BefInterpol); 
 		
-		FoVHalf_BefInterpol = FoVHalf; FoVHalf_BefInterpol(3) = -csiPars.FoV_Partition(1)/csiPars.nPartEnc_BefInterpol*(csiPars.nPartEnc_BefInterpol-1)/2;
-		Pos_Minc_BefInterpol = Pos_Minc - FoVHalf + FoVHalf_BefInterpol;
+		FoVHalf_BefInterpol = FoVHalf;
+		Pos_Minc_BefInterpol = Pos_Minc;
 		
 		csiPars.POS_X_FirstVoxel_BefInterpol = Pos_Minc_BefInterpol(1) + csiPars.StepRead_BefInterpol/2;
 		csiPars.POS_Y_FirstVoxel_BefInterpol = Pos_Minc_BefInterpol(2) + csiPars.StepPhase_BefInterpol/2;
@@ -425,37 +390,11 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 	
 
 	% Read Patientname
-	if(numel(strfind(Par.Paths.csi_path{1}, '.IMA')) > 0)
-		[bla, csiPars.PatName] = unix(['dcmdump +P "0010,0010" ' Par.Paths.csi_path{1}] );
-		csiPars.PatName = regexp(csiPars.PatName,'\[(?!^).*\^?(?!^).*\]','match');
-		if(bla > 0)		% If dcmdump doesnt exist, search for the Patient field manually. One day this probably should be directly implemented in Matlab, without using bash via unix command
-			[bla, Border1] = unix(['grep --color=''never'' -o -b -u -P -a ''\x10\x00\x10\x00'' ' Par.Paths.csi_path{1}]);			% Search for byte-offset of field 10001000, which is Patient name
-			Border1 = regexp(Border1,'\d+:','match'); Border1 = str2double(Border1{1}(1:end-1));				% Get the byte-offset
-			[bla, Border2] = unix(['grep --color=''never'' -o -b -u -P -a ''\x10\x00\x20\x00'' ' Par.Paths.csi_path{1}]);			% Search for byte-offset of field 10002000, which is the following field
-			Border2 = regexp(Border2,'\d+:','match'); Border2 = str2double(Border2{1}(1:end-1));
-			[bla, csiPars.PatName] = unix(['cat ' Par.Paths.csi_path{1} ' | head -c ' num2str(Border2) ' | tail -c ' num2str(Border2-Border1-8)]);	% Cut everything out between those fields
-			csiPars.PatName = cellstr(csiPars.PatName);
-		end
-
-
-		if(isempty(csiPars.PatName))
-			csiPars.PatName = cellstr('NoName');		% E.g. if dcmdump does not exist.
-		end
-		csiPars.PatName = regexprep(csiPars.PatName{:},{'\[','\]','\^'},{'','','_'});
+	if(isfield(Par.Paths,'T1w_path'))
+        csiPars.PatName = io_ReadPatientName(Par.Paths.T1w_path);
 	else
-		[bla, csiPars.PatName] = unix(['strings ' Par.Paths.csi_path{1} ' | grep -m 1 "tPatientName"']);		% Example Result: <ParamString."tPatientName"> { "Strasser^Bernhard" }
-		csiPars.PatName = regexp(csiPars.PatName,'{ "(?!^).*\^?(?!^).*"  }','match');                       % (?!^).*: Any character 0 or more times, but no caret, \^?: ^ 0 or 1 times. --> { "Strasser^Bernhard" }
-		csiPars.PatName = regexp(csiPars.PatName{:},'".*"','match');                                        % --> "Strasser^Bernhard"
-		if(isempty(csiPars.PatName))
-			csiPars.PatName = cellstr('NoName');		% E.g if dcmdump does not exist.
+        csiPars.PatName = io_ReadPatientName(Par.Paths.csi_path{1});
 		end
-		csiPars.PatName = regexprep(csiPars.PatName{:},{'"','\^'},{'','_'});                                % Replace " with nothing and caret with underscore. --> Strasser_Bernhard  
-	end
-	
-
-	csiPars.PatName = regexprep(csiPars.PatName,' ','_');
-
-
 
 	Par.CSI = csiPars; clear csiPars
 
@@ -485,15 +424,15 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 
 	end
 
-% 	if(0)
-% 		EllipFilt = EllipticalFilter(ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc]),[1 2],[1 1 1 floor(Par.CSI.nFreqEnc/2)-1],1);
-% 		nSpatEncCSI = sum(sum(EllipFilt)); clear EllipFilt;
-% 	else
-% 		nSpatEncCSI = Par.CSI.nFreqEnc*Par.CSI.nPhasEnc;
-% 	end
-% 	size_csidata_predicted = Par.CSI.total_channel_no * nSpatEncCSI * Par.CSI.nPartEnc * Par.CSI.nSLC * Par.CSI.vecSize * 4 * 2;  % 4: float32, 2: real imag
-% 
-% 	size_csidata_ratio = size_csidata_predicted / size_csidata;
+	if(Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq == 2)
+		EllipFilt = EllipticalFilter(ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc]),[1 2],[1 1 1 floor(Par.CSI.nFreqEnc/2)-1],1);
+		nSpatEncCSI = sum(sum(EllipFilt)); clear EllipFilt;
+	else
+		nSpatEncCSI = Par.CSI.nFreqEnc*Par.CSI.nPhasEnc;
+	end
+	size_csidata_predicted = Par.CSI.total_channel_no * nSpatEncCSI * Par.CSI.nPartEnc * Par.CSI.nSLC * Par.CSI.vecSize * 4 * 2;  % 4: float32, 2: real imag
+
+	size_csidata_ratio = size_csidata_predicted / size_csidata;
 
 
 
@@ -502,74 +441,148 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 
 	% Set the Parallel Imaging Flags and values, if info is written in the header of the CSI data
 	% 1D Caipi. Only if the size ratio is above 1.7
-% 	if(size_csidata_ratio > 1.7)
-% 		% Check if info is available in wipmemblock
-% 		OneDCaipInfoAvail = isfield(Par.CSI,'WipMemBlockInterpretation') && isfield(Par.CSI.WipMemBlockInterpretation,'OneDCaipi') && isstruct(Par.CSI.WipMemBlockInterpretation.OneDCaipi) ...
-% 		&& Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceParallelImaging_flag;
-% 		% Check if the user gave info. Dont touch user given info.
-% 		if(OneDCaipInfoAvail && ~isfield(Par.Settings,'SliceAliasingPattern') && ~isfield(Par.Settings,'FoVShifts_x') && ~isfield(Par.Settings,'FoVShifts_y') )
-% 			Par.Settings.SliceAliasingPattern = Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceAliasingPattern;	
-% 			Par.Settings.FoVShifts_x = Par.CSI.WipMemBlockInterpretation.OneDCaipi.FoVShifts_x;
-% 			Par.Settings.FoVShifts_y = Par.CSI.WipMemBlockInterpretation.OneDCaipi.FoVShifts_y;
-% 			Par.Flags.SliceParallelImaging_flag = Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceParallelImaging_flag;
-% 		end
-% 	end
-% 	% Make SliceAliasing Patterns like [1 2], [1 3; 2 4], [1 4; 2 5;3 6] ...
-% 	if(Par.Flags.SliceParallelImaging_flag && ~isfield('Par.Settings','SliceAliasingPattern'))
-% 		for AliLoop = 1:numel(Par.Settings.FoVShifts_x)/2
-% 			Par.Settings.SliceAliasingPattern(AliLoop,:) = [AliLoop AliLoop+numel(Par.Settings.FoVShifts_x)/2];
-% 		end
-% 	end
-% 
-% 	% Calculate ratio again with new info
-% 	if(Par.Flags.SliceParallelImaging_flag)
-% 		size_csidata_predicted = size_csidata_predicted / size(Par.Settings.SliceAliasingPattern,2);
-% 	end
-% 	size_csidata_ratio = size_csidata_predicted / size_csidata;
-% 
-% 
-% 	% 2D Caipi. Only if the size ratio is above 1.4
-% 	if(size_csidata_ratio > 1.4)
-% 		TwoDCaipInfoAvail = isfield(Par.CSI,'WipMemBlockInterpretation') && isfield(Par.CSI.WipMemBlockInterpretation,'TwoDCaipi') && isstruct(Par.CSI.WipMemBlockInterpretation.TwoDCaipi);
-% 		
-% 		TwoDCaipInfoDefective = ~isstruct(Par.CSI.WipMemBlockInterpretation.TwoDCaipi) && Par.CSI.WipMemBlockInterpretation.TwoDCaipi == -1;
-% 		if(TwoDCaipInfoDefective && ~isfield(Par.Settings,'InPlaneCaipPattern'))
-% 			fprintf('\nERROR: 2D-CAIPI seems to have been performed, but I could not read the Pattern.')
-% 			fprintf('\nInput the 2D-Pattern manually with option r\n(e.g.: -r ''InPlaneCaipPattern = zeros([5 5]); InPlaneCaipPattern([4 7 9 15 18 21]) = 1; VD_Radius = 1;'').\nStopping here.')
-% 			
-% 			fprintf(ErrorFile,'ErrorInGetPar_CreateTempl=1; ErrorMessage=''TwoDCaipiInfo defective in ascconv header.''');
-% 			fclose(ErrorFile);	
-% 			return;
-% 		end
-% 		
-% 		
-% 		if(TwoDCaipInfoAvail && ~isfield(Par.Settings,'InPlaneCaipPattern') && ~isfield(Par.Settings,'VD_Radius'))
-% 			Par.Settings.InPlaneCaipPattern = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.Skip_Matrix;
-% 			Par.Settings.VD_Radius = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.VD_Radius;
-% 			Par.Flags.TwoDCaipParallelImaging_flag = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.TwoDCaipParallelImaging_flag;
-% 		end
-% 	end
-% 
-% 
-% 
-% 
-% 
-% 	if(isfield(Par.Settings,'InPlaneCaipPattern') && sum(sum(Par.Settings.InPlaneCaipPattern)) == numel(Par.Settings.InPlaneCaipPattern) ...
-% 		|| isfield(Par.Settings,'VD_Radius') && Par.Settings.VD_Radius > floor(Par.CSI.nFreqEnc/2)-1)		% i.e. if there is no 2D-PI in fact, because all the values are 1
-% 		Par.Flags.TwoDCaipParallelImaging_flag = 0;
-% 	end
-% 
-% 	if(isfield(Par.Settings,'SliceAliasingPattern') && size(Par.Settings.SliceAliasingPattern,2) == 1)		% i.e. if there is no 2D-PI in fact, because no slices are aliased with each other
-% 		Par.Flags.SliceParallelImaging_flag = 0;
-% 	end
+	if(size_csidata_ratio > 1.7)
+		% Check if info is available in wipmemblock
+		OneDCaipInfoAvail = isfield(Par.CSI,'WipMemBlockInterpretation') && isfield(Par.CSI.WipMemBlockInterpretation,'OneDCaipi') && isstruct(Par.CSI.WipMemBlockInterpretation.OneDCaipi) ...
+		&& Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceParallelImaging_flag;
+		% Check if the user gave info. Dont touch user given info.
+		if(OneDCaipInfoAvail && ~isfield(Par.Settings,'SliceAliasingPattern') && ~isfield(Par.Settings,'FoVShifts_x') && ~isfield(Par.Settings,'FoVShifts_y') )
+			Par.Settings.SliceAliasingPattern = Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceAliasingPattern;	
+			Par.Settings.FoVShifts_x = Par.CSI.WipMemBlockInterpretation.OneDCaipi.FoVShifts_x;
+			Par.Settings.FoVShifts_y = Par.CSI.WipMemBlockInterpretation.OneDCaipi.FoVShifts_y;
+			Par.Flags.SliceParallelImaging_flag = Par.CSI.WipMemBlockInterpretation.OneDCaipi.SliceParallelImaging_flag;
+		end
+	end
+	% Make SliceAliasing Patterns like [1 2], [1 3; 2 4], [1 4; 2 5;3 6] ...
+	if(Par.Flags.SliceParallelImaging_flag && ~isfield('Par.Settings','SliceAliasingPattern'))
+		for AliLoop = 1:numel(Par.Settings.FoVShifts_x)/2
+			Par.Settings.SliceAliasingPattern(AliLoop,:) = [AliLoop AliLoop+numel(Par.Settings.FoVShifts_x)/2];
+		end
+	end
+
+	% Calculate ratio again with new info
+	if(Par.Flags.SliceParallelImaging_flag)
+		size_csidata_predicted = size_csidata_predicted / size(Par.Settings.SliceAliasingPattern,2);
+	end
+	size_csidata_ratio = size_csidata_predicted / size_csidata;
+
+
+	% 2D Caipi. Only if the size ratio is above 1.4
+	if(size_csidata_ratio > 1.4)
+		TwoDCaipInfoAvail = isfield(Par.CSI,'WipMemBlockInterpretation') && isfield(Par.CSI.WipMemBlockInterpretation,'TwoDCaipi') && isstruct(Par.CSI.WipMemBlockInterpretation.TwoDCaipi);
+
+		TwoDCaipInfoDefective = TwoDCaipInfoAvail && ~isstruct(Par.CSI.WipMemBlockInterpretation.TwoDCaipi) && Par.CSI.WipMemBlockInterpretation.TwoDCaipi == -1;
+		if(TwoDCaipInfoDefective && ~isfield(Par.Settings,'InPlaneCaipPattern'))
+			fprintf('\nERROR: 2D-CAIPI seems to have been performed, but I could not read the Pattern.')
+			fprintf('\nInput the 2D-Pattern manually with option r\n(e.g.: -r ''InPlaneCaipPattern = zeros([5 5]); InPlaneCaipPattern([4 7 9 15 18 21]) = 1; VD_Radius = 1;'').\nStopping here.')
+
+			fprintf(ErrorFile,'ErrorInGetPar_CreateTempl=1; ErrorMessage=''TwoDCaipiInfo defective in ascconv header.''');
+			fclose(ErrorFile);	
+			return;
+		end
+
+		if(TwoDCaipInfoAvail && ~isfield(Par.Settings,'InPlaneCaipPattern') && ~isfield(Par.Settings,'VD_Radius'))
+			Par.Settings.InPlaneCaipPattern = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.Skip_Matrix;
+			Par.Settings.VD_Radius = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.VD_Radius;
+			Par.Flags.TwoDCaipParallelImaging_flag = Par.CSI.WipMemBlockInterpretation.TwoDCaipi.TwoDCaipParallelImaging_flag;
+		end
+	end
 
 
 
 
 
+	if(isfield(Par.Settings,'InPlaneCaipPattern') && sum(sum(Par.Settings.InPlaneCaipPattern)) == numel(Par.Settings.InPlaneCaipPattern) ...
+		|| isfield(Par.Settings,'VD_Radius') && Par.Settings.VD_Radius > floor(Par.CSI.nFreqEnc/2)-1)		% i.e. if there is no 2D-PI in fact, because all the values are 1
+		Par.Flags.TwoDCaipParallelImaging_flag = 0;
+	end
+
+	if(isfield(Par.Settings,'SliceAliasingPattern') && size(Par.Settings.SliceAliasingPattern,2) == 1)		% i.e. if there is no 2D-PI in fact, because no slices are aliased with each other
+		Par.Flags.SliceParallelImaging_flag = 0;
+    end
 
 
-	%% 4. Get the imaging Information
+
+    %% 4. Get the B0map information
+    
+    if(Par.Flags.AlignFreq_flag && isfield(Par.Paths,'AlignFreq_path') )
+        
+        % AlignFreq_path is folder 
+        if(isempty(regexp(Par.Paths.AlignFreq_path{1},'\.mnc','ONCE')))
+            CurFile = dir(Par.Paths.AlignFreq_path{1});
+            CurFile = {CurFile.name};
+
+            B0Map_Par = read_ascconv([Par.Paths.AlignFreq_path{1} '/' CurFile{3}]);
+ 
+            Par.AlignFreq.DeltaTE_ms = diff(B0Map_Par.TEs)/1000;
+            if(numel(Par.Paths.AlignFreq_path) > 1)                     % Phase unwrapping should be done --> Need different rescale factor
+                Par.AlignFreq.RescaleFactor = 10^6/(2*pi*B0Map_Par.LarmorFreq);
+            else
+                Par.AlignFreq.RescaleFactor = 10^9/(8192*Par.AlignFreq.DeltaTE_ms*B0Map_Par.LarmorFreq);                
+            end
+            fid = fopen([tmp_dir '/B0Map_Dummy.sh'],'w+');
+            fprintf(fid,'AlignFreq_DeltaTE_ms=''%6.4f''; AlignFreq_RescaleFactor=''%9.8f'';',Par.AlignFreq.DeltaTE_ms,Par.AlignFreq.RescaleFactor);
+            fclose(fid);
+
+            clear fid CurFile
+        
+        end
+        
+        % Define size of B0MapTemplate.mnc
+        if(isempty(regexpi(Par.Settings.AlignFreq_method,'Align')))     % If Align-method is chosen, use csi_template
+            
+            % Get Stepsize etc of B0-Map
+            if(isempty(regexp(Par.Paths.AlignFreq_path{1},'\.mnc','ONCE')))
+                AlignFreqPars.FoV_Read = B0Map_Par.FoV_Read(1); AlignFreqPars.FoV_Phase = B0Map_Par.FoV_Phase(1); AlignFreqPars.FoV_Partition = B0Map_Par.FoV_Partition;
+                AlignFreqPars.nFreqEnc = B0Map_Par.nFreqEnc(1); AlignFreqPars.nPhasEnc = B0Map_Par.nPhasEnc(1); AlignFreqPars.nPartEnc = B0Map_Par.nSLC*B0Map_Par.nPartEnc;
+                
+              
+            else         % AlignFreq_path is mnc file
+                [deleteme,MincInfo] = unix(['mincinfo ' Par.Paths.AlignFreq_path{1}]);
+                Par.AlignFreq.StepRead;                
+            end
+            
+            
+            % Calculate Stepsize etc for resampled B0-Map
+            if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)
+                Par.AlignFreq.StepRead = Par.CSI.StepRead_BefInterpol/floor(abs(Par.CSI.StepRead_BefInterpol/(AlignFreqPars.FoV_Read/AlignFreqPars.nFreqEnc)));
+                Par.AlignFreq.StepPhase = Par.CSI.StepRead_BefInterpol/floor(abs(Par.CSI.StepPhase_BefInterpol/(AlignFreqPars.FoV_Phase/AlignFreqPars.nPhasEnc)));
+                Par.AlignFreq.StepSlice = Par.CSI.StepSlice_BefInterpol/floor(abs(Par.CSI.StepSlice_BefInterpol/(AlignFreqPars.FoV_Partition/AlignFreqPars.nPartEnc)));   
+                Pos_Minc_Dummy = Pos_Minc_BefInterpol;
+            else
+                Par.AlignFreq.StepRead = Par.CSI.StepRead/floor(abs(Par.CSI.StepRead/(AlignFreqPars.FoV_Read/AlignFreqPars.nFreqEnc)));
+                Par.AlignFreq.StepPhase = Par.CSI.StepRead/floor(abs(Par.CSI.StepPhase/(AlignFreqPars.FoV_Phase/AlignFreqPars.nPhasEnc)));
+                Par.AlignFreq.StepSlice = Par.CSI.StepSlice/floor(abs(Par.CSI.StepSlice/(AlignFreqPars.FoV_Partition/AlignFreqPars.nPartEnc)));                
+                Pos_Minc_Dummy = Pos_Minc;
+            end
+   
+            
+            Par.AlignFreq.POS_X_FirstVoxel = Pos_Minc_Dummy(1) + Par.AlignFreq.StepRead/2;
+            Par.AlignFreq.POS_Y_FirstVoxel = Pos_Minc_Dummy(2) + Par.AlignFreq.StepPhase/2;
+            Par.AlignFreq.POS_Z_FirstVoxel = Pos_Minc_Dummy(3);	
+            if(Par.CSI.ThreeD_flag)
+                Par.AlignFreq.POS_Z_FirstVoxel = Par.AlignFreq.POS_Z_FirstVoxel + Par.CSI.StepSlice_BefInterpol/2;     
+            end
+            
+            Par.AlignFreq.nFreqEnc = round(abs(Par.CSI.FoV_Read / Par.AlignFreq.StepRead)); Par.AlignFreq.nPhasEnc = round(abs(Par.CSI.FoV_Phase / Par.AlignFreq.StepPhase));
+            Par.AlignFreq.nPartEnc = round(abs(Par.CSI.FoV_Partition / Par.AlignFreq.StepSlice));
+            
+            Par.AlignFreq.PhaseNormalVector = Par.CSI.PhaseNormalVector; Par.AlignFreq.ReadNormalVector = Par.CSI.ReadNormalVector; 
+            Par.AlignFreq.SliceNormalVector = Par.CSI.SliceNormalVector;   
+            
+
+        else
+            if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)
+                Par.AlignFreq.nFreqEnc = Par.CSI.nFreqEnc_BefInterpol;Par.AlignFreq.nPhasEnc = Par.CSI.nPhasEnc_BefInterpol;Par.AlignFreq.nPartEnc = Par.CSI.nPartEnc_BefInterpol;               
+            else
+                Par.AlignFreq.nFreqEnc = Par.CSI.nFreqEnc;Par.AlignFreq.nPhasEnc = Par.CSI.nPhasEnc;Par.AlignFreq.nPartEnc = Par.CSI.nPartEnc;
+            end
+        end
+        
+    end
+
+
+	%% 5. Get the imaging Information
 
 	if(Par.Flags.image_normal_flag || Par.Flags.image_VC_flag || (isfield(Par.CSI,'WipMemBlockInterpretation') && isfield(Par.CSI.WipMemBlockInterpretation,'Prescan') && isfield(Par.CSI.WipMemBlockInterpretation.Prescan,'PATREFANDIMASCAN') && isfield(Par.CSI.WipMemBlockInterpretation.Prescan.PATREFANDIMASCAN,'nPhasEnc') && Par.CSI.WipMemBlockInterpretation.Prescan.PATREFANDIMASCAN.nPhasEnc > 0) )
 		if(Par.Flags.image_normal_flag)
@@ -622,7 +635,7 @@ else
 	Par.LCMControl = Bak.LCMControl;
 end
 
-%% 5. Print Out & Save Info
+%% 6. Print Out & Save Info
 
 fprintf('\n\nI acquired the following information:\n');
 Par %#ok
@@ -638,7 +651,7 @@ for fn_dumm = fn
     fn_dummy = fn_dumm{:};
     if(iscell(Par.Paths.(fn_dummy)))
         for cell_loop = 1:numel(Par.Paths.(fn_dummy))
-            if(~cell_loop == 1)
+            if(~(cell_loop == 1))
                 cnt = cnt+1;
             end
             printdummy(:,cnt) = { fn_dummy, Par.Paths.(fn_dummy){cell_loop} };
@@ -654,9 +667,17 @@ fprintf('\n\n\nPar.Flags')
 Par.Flags
 fprintf('\n\n\nPar.Settings')
 Par.Settings
+if(isfield(Par,'AlignFreq'))
+    fprintf('\n\n\nPar.AlignFreq')
+    Par.AlignFreq
+end
 if(isfield(Par,'LCMControl'))
     fprintf('\n\n\nPar.LCMControl')
     Par.LCMControl
+end
+if(isfield(Par,'ServerInfo'))
+    fprintf('\n\n\nPar.ServerInfo')
+    Par.ServerInfo
 end
 fprintf('\n\n\nPar.CSI')
 Par.CSI
@@ -677,8 +698,8 @@ if(~exist('Bak','var'))
     end
 end
 
-clear inData
-%% 6. Create Minc Template
+
+%% 7. Create Minc Template
 
 fprintf('\n\nCreate Minc Templates\n');
 run ./Create_MincTemplates.m
@@ -687,7 +708,7 @@ run ./Create_MincTemplates.m
 
 
 
-%% 7. Matlab Part of Creating Masks
+%% 8. Matlab Part of Creating Masks
 
 
 
@@ -695,7 +716,7 @@ run ./Create_MincTemplates.m
 
 if(Par.Flags.mask_flag)
     
-    if(~isempty(regexpi(Par.Settings.mask_method, 'voi'))||~isempty(regexpi(Par.Settings.mask_method, 'dreid')))
+    if(~isempty(regexpi(Par.Settings.mask_method, 'voi')) || Par.CSI.ThreeD_flag)
         fprintf('\n\nCreate VoI Mask\n');    
         run ./create_mask_VOI.m
     end
@@ -705,6 +726,18 @@ else        % PROCESS WHOLE FoV
     
     magnitude_mask = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
     magnitude_fid = fopen([tmp_dir '/mask_brain.raw'],'w');
+    fwrite(magnitude_fid,magnitude_mask,'float');
+    fclose(magnitude_fid);
+    
+    if(Par.CSI.ThreeD_flag)
+        ZFSize = [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC] * Par.Settings.ZeroFillMetMaps;
+    else
+        ZFSize = [Par.CSI.nFreqEnc*Par.Settings.ZeroFillMetMaps Par.CSI.nPhasEnc*Par.Settings.ZeroFillMetMaps Par.CSI.nPartEnc*Par.CSI.nSLC];
+    end
+    
+    
+    magnitude_mask = ones(ZFSize);
+    magnitude_fid = fopen([tmp_dir '/mask_brain_zf.raw'],'w');
     fwrite(magnitude_fid,magnitude_mask,'float');
     fclose(magnitude_fid);
 	
@@ -720,8 +753,7 @@ end
 
 if (~Par.Flags.T1w_flag)
     fprintf('\n\nCreate Magnitude of Image, Image_VC or CSI for Masking.\n');            
-    fprintf('\n\n\n\nWARNING:\nSKIPPING DUE TO PAST ISSUES!!!\nPL20220502\n\n\n\n');
-%    run ./create_magnitude.m
+    run ./create_magnitude.m
 end
 
 
