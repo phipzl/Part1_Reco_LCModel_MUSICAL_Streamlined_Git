@@ -75,6 +75,7 @@ cp ${tmp_dir}/magnitude.mnc ${out_path}/maps/magnitude.mnc
 ##### Create FLAIR minc
 if [[ $FLAIR_flag -eq 1 ]]; then
 echo -e "\n\n Do it with FLAIR! \n\n"	
+./Split_DICOM_Folder.sh -f $FLAIR_path
 mkdir ${tmp_dir}/mnc
 dcm2mnc $FLAIR_path ${tmp_dir}/mnc 
 mv ${tmp_dir}/mnc/*/* ${tmp_dir}/flair.mnc
