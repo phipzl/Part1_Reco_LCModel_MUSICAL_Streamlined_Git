@@ -44,9 +44,9 @@ end
 if(~FastPIReprocess_flag)
     fprintf('\n\nREAD CSI DATA')  
 	if(~Par.Flags.NonCartTraj_flag)
-        [csi, image, NoiseData] = io_ReadAndReshapeSiemensData(Par.Paths.csi_path{CurAvg});
+        [csi, image, NoiseData] = io_ReadAndReshapeSiemensData(Par.Paths.csi_path(CurAvg));
 	else
-        [csi,image, NoiseData] = io_ReadAndReshapeSiemensData(Par.Paths.csi_path{CurAvg},Par.Paths.NonCartTrajFile_path{1});     % Spiral sequences need external trajectory file
+        [csi,image, NoiseData] = io_ReadAndReshapeSiemensData(Par.Paths.csi_path(CurAvg),Par.Paths.NonCartTrajFile_path{1});     % Spiral sequences need external trajectory file
 	end
     
     if(strcmpi(csi.Par.AssumedSequence, 'CSIOrSVS'))
@@ -180,12 +180,12 @@ if(~FastPIReprocess_flag)
 
 end
     
-    %% Averaging
+%% Averaging
 
-    if(exist('image','var'))
-        image = op_AverageMRData(image);        % Currently does nothing
-    end
-    csi = op_AverageMRData(csi);        % Currently does nothing
+if(exist('image','var'))
+    image = op_AverageMRData(image);        % Currently does nothing
+end
+csi = op_AverageMRData(csi);        % Currently does nothing
 
 
 
@@ -266,7 +266,7 @@ end
 
 %% Perform Fourier Transform of image
 
-if(~FastPIReprocess_flag)
+if(~FastPIReprocess_flag && ~(isfield(image.Par,'dicom_flag') && image.Par.dicom_flag))
     if(exist('image','var'))
         if(~isfield(image.Par,'SpatialSpectralEncoding_flag'))
             image.Par.SpatialSpectralEncoding_flag = false;
@@ -288,7 +288,7 @@ if(~FastPIReprocess_flag)
         else
           
             % Do z-fft before conj that is sometimes done in in-plane FFT
-            if(csi.RecoPar.nPartEnc > 1)
+            if(image.RecoPar.nPartEnc > 1)
                 Settings.zCartFFT.ConjFlag = false;    
                 Settings.zCartFFT.Ifft_flag = false;    
                 Settings.zCartFFT.FlipDim_flag = false;
@@ -351,7 +351,7 @@ end
 
 %% Perform Fourier Transform of csi
 
-if(~FastPIReprocess_flag)
+if(~FastPIReprocess_flag && ~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_flag))
     if(~isfield(csi.Par,'SpatialSpectralEncoding_flag'))
         csi.Par.SpatialSpectralEncoding_flag = false;
     end 
@@ -513,58 +513,61 @@ size_csi(5) = size(csi.Data,5);
 % spring cleaning
 clear image_flip image_dummy image_flip_dummy image_VC_dummy fid_mask file_no slice_no
 
-if(~FastPIReprocess_flag)
-    fprintf('\n\nCompute the Coil Combination Weights w_n')  
+if(~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_flag))
+    
+    if(~FastPIReprocess_flag)
+        fprintf('\n\nCompute the Coil Combination Weights w_n')  
 
-    weights.Data = 1;
-	if(size_csi(5) > 1 && exist('image','var') && Par.Flags.image_VC_flag)                  % Sensmap Weights
-        fprintf('\nCompute a sensitivity map and use it for coil combination . . .\n')  
+        weights.Data = 1;
+        if(size_csi(5) > 1 && exist('image','var') && Par.Flags.image_VC_flag)                  % Sensmap Weights
+            fprintf('\nCompute a sensitivity map and use it for coil combination . . .\n')  
 
-        weights = image;
-		weights.Data = image.Data ./ repmat(image_VC.Data, [1 1 1 1 size(image.Data,5)]);
+            weights = image;
+            weights.Data = image.Data ./ repmat(image_VC.Data, [1 1 1 1 size(image.Data,5)]);
 
 
-	elseif(size_csi(5) > 1 && exist('image','var'))									% MUSICAL weights
-        fprintf('\nUse the imaging data for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
-        weights = image; weights.Data = conj(weights.Data(:,:,:,4,:));
-%         weights.Mask = mask;
+        elseif(size_csi(5) > 1 && exist('image','var'))									% MUSICAL weights
+            fprintf('\nUse the imaging data for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
+            weights = image; weights.Data = conj(weights.Data(:,:,:,4,:));
+    %         weights.Mask = mask;
 
-	elseif(size_csi(5) > 1 && ~exist('image','var'))                              % 1st FID point weights
-        fprintf('\nUse the first FID point for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
-        weights = csi;
-		weights.Data = conj(csi.Data(:,:,:,1,:));
+        elseif(size_csi(5) > 1 && ~exist('image','var'))                              % 1st FID point weights
+            fprintf('\nUse the first FID point for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
+            weights = csi;
+            weights.Data = conj(csi.Data(:,:,:,1,:));
 
-	elseif(size_csi(5) == 1 && exist('image','var'))                              % Weights and for VC data if image was inputted.
-        fprintf('\nPhase csi with the imaging data.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
-        weights = image;
-		weights.Data = image.Data ./ abs(image.Data);                                              % Only phase VC data. This makes abs(weights) = 1. Thus also scaling = 1. Hence csi data is only phased.
+        elseif(size_csi(5) == 1 && exist('image','var'))                              % Weights and for VC data if image was inputted.
+            fprintf('\nPhase csi with the imaging data.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
+            weights = image;
+            weights.Data = image.Data ./ abs(image.Data);                                              % Only phase VC data. This makes abs(weights) = 1. Thus also scaling = 1. Hence csi data is only phased.
 
-	end
+        end
 
-	clear image image_VC
+        clear image image_VC
 
+    end
+
+    % Load the water reference weights and overwrite current ones, because: If
+    % imaging weights are used
+    if(Par.Flags.WaterReference_flag && exist([Par.Paths.out_path '/WaterReference.mat' ],'file') && exist('weights','var'))	% If water ref alrdy exists, load and use its weights
+        load([Par.Paths.out_path '/WaterReference.mat' ],'weights')
+    end
+
+
+    % Weight and Sum CSI Data
+    fprintf('\n\nWeight and Sum CSI Data')  
+
+    csi = op_CoilCombineData(csi,weights);
+
+
+
+    % Rescale csi
+    csi.Data = csi.Data * 10^5;
+    if(isfield(csi,'NoiseData'))
+        csi.NoiseData = csi.NoiseData * 10^5;
+    end
 end
-
-% Load the water reference weights and overwrite current ones, because: If
-% imaging weights are used
-if(Par.Flags.WaterReference_flag && exist([Par.Paths.out_path '/WaterReference.mat' ],'file') && exist('weights','var'))	% If water ref alrdy exists, load and use its weights
-	load([Par.Paths.out_path '/WaterReference.mat' ],'weights')
-end
-
-
-%% Weight and Sum CSI Data
-fprintf('\n\nWeight and Sum CSI Data')  
-
-csi = op_CoilCombineData(csi,weights);
-
-
-
-%% Rescale csi
-csi.Data = csi.Data * 10^5;
-if(isfield(csi,'NoiseData'))
-    csi.NoiseData = csi.NoiseData * 10^5;
-end
-
+    
 
 %% DEBUG MODE: PLOT UNPHASED, PHASED & SUMMED SPECTRA
 
@@ -864,23 +867,23 @@ end
 %% Apply Hamming Filter to Combined MRSI Data
 
 if(Par.Flags.hamming_flag)
-	if( ~csi.Par.SpatialSpectralEncoding_flag)
+	if( ~isfield(csi.Par,'SpatialSpectralEncoding_flag') || ~csi.Par.SpatialSpectralEncoding_flag)      % For SpatialSpectralEncoding we have done it already during reco
     
 	    fprintf('\n\nAPPLY HAMMING FILTER')  % If Full_ElliptWeighted_Or_Weighted_Acq = 4, the data is alrdy intrinsically filtered in z-dimension
 	    % Was the WeightedAcquisition undone?
 	    UndoWeightedAcq_flag = false;
 	    if(isfield(csi,'RecoSteps'))
-		fieldies = fieldnames(csi.RecoSteps); field = fieldies(~cellfun(@isempty,regexpi(fieldies,'op_AverageMRData')));
-		if(~isempty(field))
-		    UndoWeightedAcq_flag = csi.RecoSteps.(field{1}).UndoWeightedAveraging_flag;
-		end
+            fieldies = fieldnames(csi.RecoSteps); field = fieldies(~cellfun(@isempty,regexpi(fieldies,'op_AverageMRData')));
+            if(~isempty(field))
+                UndoWeightedAcq_flag = csi.RecoSteps.(field{1}).UndoWeightedAveraging_flag;
+            end
 	    end
 	    if(size_csi(3) > 1 && Par.CSI.ThreeD_flag && (Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq ~= 4 || UndoWeightedAcq_flag))      
-		csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
-	    else
-		csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
+            csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
+        else
+            csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
 	    end 
-    elseif(csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
+    elseif(isfield(csi.Par,'SpatialSpectralEncoding_flag') && csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
 		csi.Data = HammingFilter(csi.Data,[3],Par.Settings.hamming_factor,'OuterProduct',0);   
 
 	end

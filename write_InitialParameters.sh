@@ -47,6 +47,10 @@ for csi_path_dummy in ${csi_path}; do
 done
 
 NumberOfCSIFiles=$(echo ${csi_path} | grep -oi  "\.dat\|\.IMA" | wc -l)
+echo ${csi_path}
+if [[ $NumberOfCSIFiles -eq 0 ]]; then
+	NumberOfCSIFiles=$(ls ${csi_path}/* | grep -oi -m 1  "\.dat\|\.IMA" | wc -l)
+fi
 
 Loop_index=0
 for basis_path_dummy in ${basis_path}; do

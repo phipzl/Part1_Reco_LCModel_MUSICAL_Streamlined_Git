@@ -217,6 +217,30 @@ end
 clear TestLocal bla out_dir_attr;
 
 
+
+%% If Folder with DICOMs is passed over, make list of DICOM files
+
+BakCSIPath = Par.Paths.csi_path;
+if(numel(Par.Paths.csi_path) == 1)
+    Existence = exist(Par.Paths.csi_path{1},'file');
+    if(Existence == 7) % Return value is 7 for folder
+        
+        csi_path_allfiles = dir( fullfile(Par.Paths.csi_path{1},'*.IMA') );
+        csi_path_allfiles = {csi_path_allfiles.name}';
+        csi_path_allfiles = strcat(Par.Paths.csi_path{1},'/',csi_path_allfiles);
+        if(numel(csi_path_allfiles) > 0)
+            Par.Paths.csi_path = csi_path_allfiles;
+        else
+            fprintf('\nError in GetPar_CreateTempl_MaskPart1.m: Could not find any DICOM files in the folder you gave me. Abort.\n');
+            return;            
+        end
+        
+    end
+end
+
+
+
+
 %% 3. Get the CSI Information
 
 if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read header of first csi file. The others must be the same
@@ -252,7 +276,7 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 		fprintf('\n\nWarning: Some spectra will be summed, but no frequency alignment was requested. I set AlignFreq_flag = true.\n\n')
 		Par.Flags.AlignFreq_flag = true;
 	end
-	if(numel(Par.Paths.csi_path) > 1 && ~Par.Flags.AlignFreq_flag)
+	if(numel(BakCSIPath) > 1 && ~Par.Flags.AlignFreq_flag)  % Need BakCSIPath here, bc we temporarily overwrite this with all dicom files if we read in dicoms
 		fprintf('\n\nWarning: Perform averaging of several csi data sets, but no frequency alignment was requested. I set AlignFreq_flag = true.\n\n')
 		Par.Flags.AlignFreq_flag = true;
 	end	
@@ -634,6 +658,12 @@ else
 	Par.Settings = Bak.Settings;
 	Par.LCMControl = Bak.LCMControl;
 end
+
+%% In case we have folder with dicom files
+if(exist('BakCSIPath','var'))
+    Par.Paths.csi_path = BakCSIPath;
+end
+
 
 %% 6. Print Out & Save Info
 
