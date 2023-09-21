@@ -30,9 +30,10 @@ if(isfield(Par.Paths,'NonCartTrajFile_path'))
 else
     NonCartTrajFile_path = [];
 end
+UseCSIForMagnitude_flag = false;
 
 if(Par.Flags.image_normal_flag)                                                                                   % If Imaging data was inputted.
-
+	Sett.NonCartReco.CircularSFTFoV_flag = true; 
     Sett.NonCartReco.Phaseroll_flag = false;
     magnitude = op_ReadAndRecoSiemensData(Par.Paths.image_normal_path{1},NonCartTrajFile_path,[],Sett);           % Read in data
     magnitude = magnitude.Data(:,:,:,1,:);
@@ -47,8 +48,9 @@ if(Par.Flags.image_normal_flag)                                                 
     clear magnitude_flp
 
 elseif(Par.Flags.image_VC_flag)                                                                                   % If ONLY VC-data was inutted for creating the mask
+		Sett.NonCartReco.CircularSFTFoV_flag = true; 
         Sett.NonCartReco.Phaseroll_flag = false;
-        magnitude_weighting = (read_image(Par.Paths.image_VC_path{1},[],Sett));
+        magnitude = (op_ReadAndRecoSiemensData(Par.Paths.image_VC_path{1},[],Sett));
 
 else
     Sett.NonCartReco.Phaseroll_flag = false;
@@ -56,7 +58,8 @@ else
     if(~isempty(fieldnames(RefScan)))
         magnitude = RefScan.Data(:,:,:,1,:,:,:);
 	else
-        magnitude = MRSI.Data(:,:,:,1,:,:,:);        
+        UseCSIForMagnitude_flag = true;
+        magnitude = MRSI.Data(:,:,:,5,:,:,:);        
 	end
     clear MRSI RefScan
 end 
@@ -65,11 +68,13 @@ end
 
 %% 2. SOS OF ALL THE CHANNELS
 
-magnitude = HammingFilter(magnitude,[1 2 3],100,'OuterProduct',0);
-magnitude = HammingFilter(magnitude,[1 2 3],100,'OuterProduct',0);
+if(UseCSIForMagnitude_flag)
+    magnitude = HammingFilter(magnitude,[1 2 3],100,'OuterProduct',0);
+end
 magnitude = squeeze(sqrt(sum(abs(magnitude).^2,5)));
 
 
+magnitude = magnitude/max(magnitude(:)) * 1000;
 
 
 

@@ -339,12 +339,12 @@ else 		# If no mask-flag was used. There will be still a mask full of ones, crea
 	cp ${tmp_dir}/mask_brain.raw ${out_path}/maps/mask.raw
 	cp ${tmp_dir}/mask_brain_zf.raw ${out_path}/maps/mask_zf.raw
 
-		## Resample to CSI
-		mincresample -clobber -nearest_neighbour -like ${tmp_dir}/csi_template.mnc ${tmp_dir}/mask_brain_unres.mnc ${tmp_dir}/mask_brain.mnc >/dev/null
-		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+	## Resample to CSI
+	#mincresample -clobber -nearest_neighbour -like ${tmp_dir}/csi_template.mnc ${tmp_dir}/mask_brain_unres.mnc ${tmp_dir}/mask_brain.mnc >/dev/null
+	if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
 		rawtominc -float -like ${tmp_dir}/csi_template_BefInterpol.mnc -input ${tmp_dir}/mask_brain_BefInterpol.raw ${tmp_dir}/mask_brain_BefInterpol.mnc
 		cp ${tmp_dir}/mask_brain_BefInterpol.raw ${out_path}/maps/mask_BefInterpol.raw
-		fi
+	fi
 
 
 fi	# if mask_flag = 1

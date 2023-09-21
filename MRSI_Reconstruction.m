@@ -747,7 +747,7 @@ if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'f
 				param.FT = FT_v2(EllipticalWMask);	
 			end
 			param.data =  param.FT*csi_slc;
-            save('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/bstrasser/Temp2/Streamlined_Git2_submodule.mat','param','csi_slc');
+
 			for t = 1:Par.Settings.LipidDecon_NoOfLoops
 				fprintf('\nDecontamination Loop %d of %d. Norm Results:\n',t,Par.Settings.LipidDecon_NoOfLoops)
 				csi_slc = lipid_suppression(csi_slc,param);

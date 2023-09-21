@@ -380,7 +380,7 @@ echo -e "\n\n3. Write Initial Parameters\n\n"
  . ./write_InitialParameters.sh
 
 
-echo -e "Run this command: tmp_dir = '${tmp_dir}'; ${MatlabStartupCommand}\" -nodisplay < GetPar_CreateTempl_MaskPart1.m"
+echo -e "\nRun this command: tmp_dir = '${tmp_dir}'; ${MatlabStartupCommand}\" -nodisplay < GetPar_CreateTempl_MaskPart1.m\n"
 #read -p "Stop before Gathering info."
 # 4.
 ############ CREATE TEMPLATES FOR CREATING METABOLIC MAPS LATER ############
