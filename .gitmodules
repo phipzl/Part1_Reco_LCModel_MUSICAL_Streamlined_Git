@@ -1,0 +1,3 @@
+[submodule "MatlabFunctions/MRSIMatlabFunctions"]
+	path = MatlabFunctions/MRSIMatlabFunctions
+	url = https://github.com/bernhard-strasser/MRSIMatlabFunctions

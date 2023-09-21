@@ -87,12 +87,16 @@ cd "$( dirname "${BASH_SOURCE[0]}" )"
 
 
 # -1.3 Create directories
+if [[ ${tmp_folder} == "" ]]; then
+	tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
+fi
+
 tmp_trunk="tmp"
 tmp_num=1
-tmp_dir="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1/${tmp_trunk}${tmp_num}"
+tmp_dir="${tmp_folder}/${tmp_trunk}${tmp_num}"
 while [ -d "$tmp_dir" ]; do
 	let tmp_num=tmp_num+1
-	tmp_dir="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1/${tmp_trunk}${tmp_num}"	
+	tmp_dir="${tmp_folder}/${tmp_trunk}${tmp_num}"	
 done
 export tmp_dir
 mkdir $tmp_dir
@@ -148,6 +152,7 @@ export WaterReference_flag=0
 export mask_flag=0
 export hamming_flag=0
 export LipidDecon_flag=0
+export NuisRem_flag=0
 export TwoDCaipParallelImaging_flag=0
 export SliceParallelImaging_flag=0
 export noisedecorrelation_flag=0
@@ -157,14 +162,16 @@ export use_phantom_flag=0
 export ZeroFillMetMaps_flag=0
 export InterpolateCSIResolution_flag=0
 export TimeInterpolation_flag=0
-export AlignFrequency_flag=0
+export AlignFreq_flag=0
 export dont_compute_LCM_flag=0
 export LCM_ControlPath_flag=0
 export LCM_ControlPath_Water_flag=0
 export exponential_filter_Hz_flag=0
 export B1corr_flag=0
-
-
+export NonCartTraj_flag=0
+#BOW
+export priors_flag=0
+export DebugAdditionalInput_flag=0
 
 # INITIALIZING
 export phase_encoding_direction_is_RL_flag=0
@@ -175,7 +182,7 @@ LipidDecon_MethodAndNoOfLoops="L1,10"
 
 
 
-while getopts 'c:b:o:i:f:v:t:a:p:B:w:W:m:h:L:r:R:g:F:k:u:z:I:T:A:lj:e:?' OPTION
+while getopts 'c:b:o:i:f:v:t:a:p:B:w:W:m:h:L:n:r:R:g:F:k:uz:I:T:A:lj:e:P:s:D:?' OPTION
 do
 	case $OPTION in
 
@@ -226,7 +233,10 @@ do
 			export hamming_factor="$OPTARG"
 			;;
 	  L)	export LipidDecon_flag=1
-			export LipidDecon_L2BetaCorrFactor="$OPTARG"
+			export LipidDecon_MethodAndNoOfLoops="$OPTARG"
+			;;
+	  n)	export NuisRem_flag=1
+			export NuisRem_ControlPath="$OPTARG"
 			;;
 	  r)	export TwoDCaipParallelImaging_flag=1
 			export InPlaneCaipPattern_And_VD_Radius="$OPTARG"
@@ -253,8 +263,8 @@ do
 	  T)	export TimeInterpolation_flag=1
 			export TimeInterpolationFactor="$OPTARG"
 			;;
-	  A)	export AlignFrequency_flag=1
-			export AlignFrequency_path="$OPTARG"
+	  A)	export AlignFreq_flag=1
+			export AlignFreq_MethodAndPath="$OPTARG"
 			;;
 	  l)	export dont_compute_LCM_flag=1
 			;;
@@ -264,11 +274,23 @@ do
 	  e)	export exponential_filter_Hz_flag=1
 			export exponential_filter_Hz="$OPTARG"
 			;;
+			#BOW
+	  P)	export priors_flag=1
+			export priors_path="$OPTARG"
+			;;
+	  s)	export NonCartTraj_flag=1
+			export NonCartTrajFile_path="$OPTARG"
+			;;
+	  D)	export DebugAdditionalInput_flag=1
+			export DebugAdditionalInput="$OPTARG"
+			;;
+
 
 	  ?)	printf "
 
 Usage: %s
 
+HINT: Things in {} are optional.
 mandatory:
 -c	[csi file]			Format: DAT, DICOM, or .mat. If a .mat file is passed over, it is expected that everything is already performed like coil combination etc.
 						You can pass over several files of the same type by \'-c \"[csi_path1] [csi_path2] ...\"\'. These files get individually processed and averaged
@@ -283,22 +305,28 @@ optional:
 -t	[T1 images] 		Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If minc file is given instead of folder, it is treated as the magnitude file.
 -a	[T1 AntiNoise images]	Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
 -w	[Water Reference]	Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
--m	[mask]			Defines how to create the mask. Options: -m \"bet\", \"thresh\", \"voi\", \"[Path_to_usermade_mask]\". If not set --> no mask used.
+-m	[mask]			Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used. 
 -h 	[100]               	Hamming filter CSI data.
+-L 	[LipidRegMethod,RegTerm]  Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-n 	[NuisRemControlFile]  Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -r 	[InPlaneCaipPattern_And_VD_Radius]	The InPlaneCaipPattern and the VD_Radius as used in ParallelImagingSimReco.m. Example: \"InPlaneCaipPattern = [0 0 0; 0 0 0; 0 0 1]; VD_Radius = 2;\". 
 -R 	[SliceAliasingPattern]
 -g 	[noisedecorr_path]	If this option is used the csi data gets noise decorrelated using noise from passed-over noise file, or if -g \" is given, by noise from the end of the FIDs at the border of the FoV or from the PRESCAN, if available. 
 -F  [Nothing]               If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
--u	[Nothing]               If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
--I	[\"nextpow2\" Or Vector]If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size.
+-u	[Nothing]               If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted). This options is outdated.
+-I	[\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]	If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -T 	\"[TruncateFactor ZerofillFactor FillToOrig]\"		Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50% and then zerofill to 2x the original size, use [0.5 4 0].  
--A	[\"\" Or Path]          Perform frequency alignment. If a mnc file is given, use these as B0-map, otherwise shift according to water peak of center voxel.
+-A	[\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]          Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
 -l	[Nothing]               If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -j	[LCM_ControlFile]       ControlFile telling LCModel how to process the data. If you want to change the way LCModel processes data, change this file, 
 							otherwise standard values are assumed. A template file is provided in this package.
 -e	[LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
 -p      [FLAIR reading]		path of FLAIR DICOM data.
 -B	[B1 reading]		Path of B1 DICOM data, used for B1 correction.
+-p	[prior_knowledge dir]	define directory that contains Extra maps (i.e., 0_pha_map.mnc, 1_pha_map.mnc, shift_map.mnc). THIS WORKS ONLY FOR USING MEGA-OFF PRIOR KNOWLEDGE FOR MEGA-DIFF-FITTING (because 180 deg is added to the 0-order phases)
+-s	[NonCartTrajFile_path]	Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path. For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information.
+-D	[DebugAdditionalInput]	A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
+
 
 " $(basename $0) >&2
 
@@ -352,7 +380,7 @@ echo -e "\n\n3. Write Initial Parameters\n\n"
  . ./write_InitialParameters.sh
 
 
-
+echo -e "Run this command: tmp_dir = '${tmp_dir}'; ${MatlabStartupCommand}\" -nodisplay < GetPar_CreateTempl_MaskPart1.m"
 #read -p "Stop before Gathering info."
 # 4.
 ############ CREATE TEMPLATES FOR CREATING METABOLIC MAPS LATER ############
@@ -369,7 +397,7 @@ if [[ $ErrorInGetPar_CreateTempl -eq 1 ]]; then
 	TerminateProgram $DebugFlag
 fi
 
-# read -p "stop before create minc template"
+#read -p "stop before create minc template"
 bash ${tmp_dir}/CreateMincTemplates.sh
 
 
@@ -384,14 +412,37 @@ echo -e "\n\n5. CREATE MASK\n\n"
 # Lots of stuff happens here with many mnc2nii and nii2mnc calls.
 
 
-#read -p "Stop before MRSI_Reconstruction.m"
-# 6.
+#read -p "Stop before creating B0Map."
+## 6.
+############# CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA ############
+if [[ $AlignFreq_flag -eq 1 ]] && ! [[ ${AlignFreq_path} == "" ]]; then
+	echo -e "\n\n5. CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA\n\n" 
+	./create_B0Map.sh
+fi
+if [[ -f ${tmp_dir}/mask_brain_hires.mnc ]]; then
+	rm ${tmp_dir}/mask_brain_hires.mnc
+fi
+
+
+# Convert prior knowledge maps to raw if necessary
+if [[ $priors_flag -eq 1 ]]; then
+	for CurFile in 0_pha_map 1_pha_map shift_map; do
+		if [[ ! -f $priors_path/$CurFile.raw ]] && [[ -f $priors_path/$CurFile.mnc ]]; then
+			echo -e "\nconvert $priors_path/$CurFile.mnc"
+			minctoraw $priors_path/$CurFile.mnc -nonormalize -float > $priors_path/$CurFile.raw
+		fi
+	done
+fi
+
+
+
+# 7.
 ###########   Process Data, Prepare LCModel Fitting   ############
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
-date
 if [[ $WaterReference_flag -eq 1 ]]; then		# Run it twice for water referencing (it will automatically process the water ref file the first time, and the other the second time)
 	echo -e "\nProcess water reference data for water scaling."
 	echo -e "\n\nRunning:\n"; echo "\"${matlabp} -r tmp_dir = '${tmp_dir}'; ${MatlabStartupCommand}\""
+	#read -p "Stop before MRSI_Reconstruction.m Water"
 	${matlabp} -r "tmp_dir = '${tmp_dir}'; CurAvg=1; ${MatlabStartupCommand}" -nodisplay < MRSI_Reconstruction.m
 fi
 
@@ -399,26 +450,31 @@ echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, second run\n\n"
 date
 for (( CurAvg=1; CurAvg<=${NumberOfCSIFiles}; CurAvg=CurAvg+1 )); do
 	echo -e "\n\nRunning:\n"; echo "\"${matlabp} -r tmp_dir = '${tmp_dir}'; CurAvg=${CurAvg}; ${MatlabStartupCommand}\""
+	#read -p "Stop before MRSI_Reconstruction.m MRSI"
 	${matlabp} -r "tmp_dir = '${tmp_dir}'; CurAvg=${CurAvg}; ${MatlabStartupCommand}" -nodisplay < MRSI_Reconstruction.m		# If we pass over several IMA or dat files, average them
 done
 
 
 
-date
 #read -p "Stop before LCModel fitting"
-#7.
+#8.
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 if [[ $dont_compute_LCM_flag -eq 0 ]]; then
 	curdir=$(pwd)
 	CurrentComputer=$(hostname)
-	if [[ $RunLCModelOn == "" ]] || [[ $CurrentComputer == $RunLCModelOn ]]; then
+
+	# Allow either $CurrentComputer or $RunLCModelOn to include a domain name like ".nmr.meduniwien.ac.at" 
+	Search1=$(echo $CurrentComputer | grep -c "${RunLCModelOn}\.")
+	Search2=$(echo $RunLCModelOn | grep -c "${CurrentComputer}\.")
+	if [[ $RunLCModelOn == "" ]] || [[ $CurrentComputer == $RunLCModelOn ]] || [[ $Search1 > 0 ]]  || [[ $Search2 > 0 ]]; then
 		./RunLCModel.sh $RunLCModelOn $tmp_dir														# Run LCModel locally
 	else
 		rm -fR $out_path/TempServerDir
 		cp -R $tmp_dir/ $out_path/TempServerDir; RunFileOnServer=$out_path/TempServerDir/RunLCModel.sh; cp $curdir/RunLCModel.sh $RunFileOnServer
 		if [[ $RunLCModelAs == "" ]]; then																									 # Run LCModel on different computer,
 			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					 # connecting via ssh. You need 
-		else																																 # a key so that you can
+		else		
+																																	 # a key so that you can
 			ssh -o PasswordAuthentication=no -l $RunLCModelAs $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir" # automatically connect to this computer,
 		fi																																	 # without needing to type in the password!
 		sleep 40
@@ -428,62 +484,39 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
 fi
 
 
-
-#8a: GH: finish time measurement
-END=$(date +%s.%N)
-DIFF=$(echo "$END - $START" | bc)
-date
-echo -e "\n\n8. Total Processing time of Part 1: " $DIFF "\n\n"
-
-
-
-# 8.
+# 9.
 ############ WRITE THE SOURCECODE THAT WAS USED TO OUT-DIR ############
 echo -e "\n\n8. Write the used sourcecode to out-dir.\n\n"
 
 # Copy Program where this program lies in
 curdir=$(pwd)
-curdir_folder=${curdir##*/}
-mkdir -p "$out_path/UsedSourcecode/$curdir_folder"
-cp -R $curdir/* $out_path/UsedSourcecode/$curdir_folder
-#rm -R $out_path/UsedSourcecode/$curdir_folder/${tmp_dir} # now no longer necessary b/c tmp is in /ceph/.../scratch/ now  
+ScriptName=$(basename $curdir)
+curlogname=$(basename $logfile)
+BaseNameMatlabFunctions=$(basename $MatlabFunctionsFolder)
 
-## Copy the Run-files one level above the program
-#abovecurdir=${curdir%/*}	# Delete the thing that follows the last /
-#cp $abovecurdir/*.sh $out_path/UsedSourcecode
 
-# Copy the logfile
-cp $logfile $out_path/UsedSourcecode/logfile.log
-cp $logfile $out_path/logfile_part1.log
+# Archive this script itself
+cd ..
+tar cf $out_path/UsedSourcecode_Part1.tar $ScriptName --transform='s,^,/UsedSourcecode/,' --exclude='*/tmp*'
 
-# Copy Matlab Functions
-MatlabFolderFound=$(find $out_path/UsedSourcecode -maxdepth 2 -type d -name 'Matlab_Functions' | grep -c Matlab_Functions)
-if [[ $MatlabFolderFound -eq 0 ]]; then
-	cp -R $MatlabFunctionsFolder $out_path/UsedSourcecode
+# Archive the logfile
+cd $tmp_dir
+tar f $out_path/UsedSourcecode_Part1.tar -r $curlogname
+
+# Archive the Matlab functions
+if ! [[ "$curdir/$BaseNameMatlabFunctions" == "$MatlabFunctionsFolder" ]]; then
+	cd $MatlabFunctionsFolder; cd ..
+	tar f $out_path/UsedSourcecode_Part1.tar -r $BaseNameMatlabFunctions  --transform='s,^,/UsedSourcecode/,'
 fi
 
-## Remove all backup-files and git-folders
-#find $out_path/UsedSourcecode -name \*.*~ -type f -delete 2> /dev/null
-#find $out_path/UsedSourcecode -name \*.git -type d -exec rm -r {} \; 2> /dev/null
-
-# Compress the folder
-if [ -e $out_path/UsedSourcecode_Part1.tar.gz ]; then
-	rm $out_path/UsedSourcecode_Part1.tar.gz
-fi
-cd $out_path
-tar cfz $out_path/UsedSourcecode_Part1.tar.gz UsedSourcecode
+# zip everything
+gzip $out_path/UsedSourcecode_Part1.tar
 
 # Go back to the original folder
 cd $curdir
 
-# Delete the unzipped stuff
-rm -R -f $out_path/UsedSourcecode
 
-# Copy measurement information to out_path (see read_csi_dat_new_v2.m)
-cp $tmp_dir/*.txt $out_path
-
-
-#9.
+#10.
 ############ REMOVE UNECESSARY DATA ############
 if [[ $DebugFlag -eq 0 ]]; then
 	echo -e "\n\n9. Remove unnecessary data!\n\n"
@@ -495,7 +528,12 @@ if [[ $DebugFlag -eq 0 ]]; then
 	#rm $out_path/spectra/*.CSV
 fi
 
-date
+
+#8a: GH: finish time measurement
+END=$(date +%s.%N)
+DIFF=$(echo "$END - $START" | bc)
+echo -e "\n\n8. Total Processing time of Part 1: " $DIFF "\n\n"
+
 
 TerminateProgram $DebugFlag
 
