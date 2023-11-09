@@ -336,8 +336,8 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 	csiPars = rmfield(csiPars,{'Pos_Sag','Pos_Cor','Pos_Tra'});
 
         % Only for CRT?   
-        csiPars.InPlaneRotation=csiPars.InPlaneRotation-0.1;
-        csiPars.InPlaneRotation_VOI=csiPars.InPlaneRotation_VOI-0.1;
+        csiPars.InPlaneRotation=csiPars.InPlaneRotation;
+        csiPars.InPlaneRotation_VOI=csiPars.InPlaneRotation_VOI;
 
 	% Compute direction cosine from x,y and z components of slice normal vector
 	[csiPars.PhaseNormalVector, csiPars.ReadNormalVector] = compute_dircos([csiPars.SliceNormalVector_x(1) csiPars.SliceNormalVector_y(1) csiPars.SliceNormalVector_z(1)],csiPars.InPlaneRotation);

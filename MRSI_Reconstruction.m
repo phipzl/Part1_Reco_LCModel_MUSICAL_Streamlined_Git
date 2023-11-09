@@ -266,7 +266,7 @@ end
 
 %% Perform Fourier Transform of image
 
-if(~FastPIReprocess_flag && ~(isfield(image.Par,'dicom_flag') && image.Par.dicom_flag))
+if(~FastPIReprocess_flag && exist('image','var') && ~(isfield(image.Par,'dicom_flag') && image.Par.dicom_flag))
     if(exist('image','var'))
         if(~isfield(image.Par,'SpatialSpectralEncoding_flag'))
             image.Par.SpatialSpectralEncoding_flag = false;
@@ -281,6 +281,9 @@ if(~FastPIReprocess_flag && ~(isfield(image.Par,'dicom_flag') && image.Par.dicom
             Settings.NonCartReco.FlipDim = 1;
             Settings.NonCartReco.CircularSFTFoV_flag = false; 
             Settings.PreWhitenData_flag = 0;
+            if(isfield(Par.Settings,'GradientDelay'))
+                Settings.ReadInTraj.GradDelayPerTempInt_us = Par.Settings.GradientDelay;
+            end
             
             
             image = op_ReconstructMRData(image,struct(),Settings);
@@ -346,6 +349,12 @@ if(~FastPIReprocess_flag && ~(isfield(image.Par,'dicom_flag') && image.Par.dicom
 
 end
     
+if(size(image.Data,4) > 3)
+    image.Data = image.Data(:,:,:,4,:);
+else
+    image.Data = image.Data(:,:,:,1,:);
+end
+
     
 
 
@@ -365,6 +374,9 @@ if(~FastPIReprocess_flag && ~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_fla
         Settings.NonCartReco.Phaseroll_flag = true;
         Settings.NonCartReco.ConjIniSpace_flag = false; 
         Settings.PreWhitenData_flag = 0;
+        if(isfield(Par.Settings,'GradientDelay'))
+            Settings.ReadInTraj.GradDelayPerTempInt_us = Par.Settings.GradientDelay;
+        end
 
         % Reco MRSI Data
         csi = op_ReconstructMRData(csi,struct(),Settings);
@@ -523,23 +535,23 @@ if(~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_flag))
             fprintf('\nCompute a sensitivity map and use it for coil combination . . .\n')  
 
             weights = image;
-            weights.Data = image.Data ./ repmat(image_VC.Data, [1 1 1 1 size(image.Data,5)]);
+            weights.Data = conj(image.Data(:,:,:,1,:)) ./ repmat(image_VC.Data(:,:,:,1,:), [1 1 1 1 size(image.Data,5)]);
 
 
         elseif(size_csi(5) > 1 && exist('image','var'))									% MUSICAL weights
             fprintf('\nUse the imaging data for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
-            weights = image; weights.Data = conj(weights.Data(:,:,:,4,:));
+            weights = image; weights.Data = conj(weights.Data(:,:,:,1,:));
     %         weights.Mask = mask;
 
         elseif(size_csi(5) > 1 && ~exist('image','var'))                              % 1st FID point weights
-            fprintf('\nUse the first FID point for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
+            fprintf('\nUse the fourth FID point for coil combination.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
             weights = csi;
-            weights.Data = conj(csi.Data(:,:,:,1,:));
+            weights.Data = conj(csi.Data(:,:,:,4,:));
 
         elseif(size_csi(5) == 1 && exist('image','var'))                              % Weights and for VC data if image was inputted.
             fprintf('\nPhase csi with the imaging data.\n')  																					% (Siemens does that, so that the spectra increase in frequency from right to left)
             weights = image;
-            weights.Data = image.Data ./ abs(image.Data);                                              % Only phase VC data. This makes abs(weights) = 1. Thus also scaling = 1. Hence csi data is only phased.
+            weights.Data = conj(image.Data(:,:,:,1,:)) ./ abs(image.Data);                                              % Only phase VC data. This makes abs(weights) = 1. Thus also scaling = 1. Hence csi data is only phased.
 
         end
 

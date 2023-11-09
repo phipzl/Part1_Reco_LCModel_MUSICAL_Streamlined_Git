@@ -38,6 +38,10 @@ export MatlabStartupCommand="${MatlabStartupCommand} x = strcat(Paths(rmpathss),
 tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
 
 
+# Gradient Delays (measured at Vienna 7 T scanner, ~2023-10) 
+export DefaultGradientDelaysForCRTTrajectory="[12.562838, 12.540197, 10.082248]"
+
+
 # LCModel Path
 export LCM_Path="/usr/local/lcmodel/bin/lcmodel"
 

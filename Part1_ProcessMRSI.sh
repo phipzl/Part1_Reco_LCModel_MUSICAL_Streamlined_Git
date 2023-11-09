@@ -172,6 +172,7 @@ export NonCartTraj_flag=0
 #BOW
 export priors_flag=0
 export DebugAdditionalInput_flag=0
+export GradientDelay_flag=0
 
 # INITIALIZING
 export phase_encoding_direction_is_RL_flag=0
@@ -182,7 +183,7 @@ LipidDecon_MethodAndNoOfLoops="L1,10"
 
 
 
-while getopts 'c:b:o:i:f:v:t:a:p:B:w:W:m:h:L:n:r:R:g:F:k:uz:I:T:A:lj:e:P:s:D:?' OPTION
+while getopts 'c:b:o:i:f:v:t:a:p:B:w:W:m:h:L:n:r:R:g:F:k:uz:I:T:A:lj:e:P:s:D:G:?' OPTION
 do
 	case $OPTION in
 
@@ -284,7 +285,9 @@ do
 	  D)	export DebugAdditionalInput_flag=1
 			export DebugAdditionalInput="$OPTARG"
 			;;
-
+	  G)	export  GradientDelay_flag=1
+			export  GradientDelay="$OPTARG"
+			;;
 
 	  ?)	printf "
 
@@ -324,9 +327,9 @@ optional:
 -p      [FLAIR reading]		path of FLAIR DICOM data.
 -B	[B1 reading]		Path of B1 DICOM data, used for B1 correction.
 -p	[prior_knowledge dir]	define directory that contains Extra maps (i.e., 0_pha_map.mnc, 1_pha_map.mnc, shift_map.mnc). THIS WORKS ONLY FOR USING MEGA-OFF PRIOR KNOWLEDGE FOR MEGA-DIFF-FITTING (because 180 deg is added to the 0-order phases)
--s	[NonCartTrajFile_path]	Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path. For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information.
+-s	[NonCartTrajFile_path]	Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
 -D	[DebugAdditionalInput]	A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
-
+-G	[ GradientDelay]	Gradient delay in us for CRT sequence. Not used if a mat file is provided with flag \"-s\", and only used for CRT trajectories (so far). The gradient delay can be one number overall, or specified per temporal interleaf (CAUTION: Not per physical gradient axis). 
 
 " $(basename $0) >&2
 
@@ -371,6 +374,14 @@ mkdir -p ${out_path}/scalings
 #	fi
 #fi
 
+
+# Set kSpaceCorrection to Default value written in InstallProgramPaths.sh
+if [[ $GradientDelay_flag -eq 0 ]]; then
+	if [ ! -z "$DefaultGradientDelaysForCRTTrajectory" ]; then 
+		export  GradientDelay_flag=1
+		export  GradientDelay="$DefaultGradientDelaysForCRTTrajectory"
+	fi
+fi
 
 
 

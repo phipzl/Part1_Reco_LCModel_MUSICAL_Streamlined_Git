@@ -37,6 +37,7 @@ echo "phase_encoding_direction_is_RL_flag = ${phase_encoding_direction_is_RL_fla
 echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par
 echo "DebugAdditionalInput_flag = ${NonCartTraj_flag};" >> $Par
+echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
 
 
 # Mandatory Input files, Output directory
@@ -159,6 +160,11 @@ if [[ $NonCartTraj_flag -eq 1 ]]; then
 fi
 if [[ $DebugAdditionalInput_flag -eq 1 ]]; then
 	echo "DebugAdditionalInput = '${DebugAdditionalInput}';" >> $Par
+fi
+if [[ $GradientDelay_flag -eq 1 ]]; then
+	echo "GradientDelay = ${GradientDelay};" >> $Par
+else
+	echo "GradientDelay = 0;" >> $Par
 fi
 
 
