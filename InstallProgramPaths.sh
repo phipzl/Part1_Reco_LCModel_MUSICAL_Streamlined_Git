@@ -16,13 +16,13 @@
 
 # MATLAB 
 #export matlabp='/usr/local/matlab78/bin/matlab'
-export matlabp='/bilbo/usr/local/matlab2017b/bin/matlab'
+export matlabp='/usr/local/bin/matlab'
 
 # Brain extraction tool (bet)
 export betp='/usr/local/fsl/bin/bet'
 
 # Install Minc-Tools or include all the paths so that the script knows rawtominc, mincmath, dcm2mnc etc.
- . /opt/minc/minc-toolkit-config.sh
+ . /opt/minc/1.9.17/minc-toolkit-config.sh
 
 # MATLAB Functions Folder
 LocalMatDir=`pwd`
