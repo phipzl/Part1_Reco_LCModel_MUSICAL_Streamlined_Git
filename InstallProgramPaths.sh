@@ -43,9 +43,9 @@ export DefaultGradientDelaysForCRTTrajectory="[12.562838, 12.540197, 10.082248]"
 
 
 # LCModel Path
-export LCM_Path="/usr/local/lcmodel/bin/lcmodel"
+export LCM_Path="/ceph/nchirurg.meduniwien.ac.at/lab/.lcmodel/bin/lcmodel"
 
-export RunLCModelOn="lcm"		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
+export RunLCModelOn=""		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
 									# computer, without needing to type in the password!
 									# BE AWARE THAT THIS COMPUTER HAS TO BE ABLE TO ACCESS THE "LCM_Path", THE BASIS-FILE AND THE "out_path"!
 export RunLCModelAs=""				# If you need to be a specific user on the LCModel computer. Leave empty (or dont declare it at all) if not necessary.
