@@ -88,7 +88,7 @@ cd "$( dirname "${BASH_SOURCE[0]}" )"
 
 # -1.3 Create directories
 if [[ ${tmp_folder} == "" ]]; then
-	tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
+	tmp_folder="/ceph/nchirurg.meduniwien.ac.at/scratch/tmp_MRSI_processing/Part1"
 fi
 
 tmp_trunk="tmp"
@@ -482,7 +482,7 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
 	else
 		rm -fR $out_path/TempServerDir
 		cp -R $tmp_dir/ $out_path/TempServerDir; RunFileOnServer=$out_path/TempServerDir/RunLCModel.sh; cp $curdir/RunLCModel.sh $RunFileOnServer
-		if [[ $RunLCModelAs == "" ]]; then																									 # Run LCModel on different computer,
+		if [[ $RunLCModelAs == "" ]]; then # Run LCModel on different computer,
 			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					 # connecting via ssh. You need 
 		else		
 																																	 # a key so that you can
