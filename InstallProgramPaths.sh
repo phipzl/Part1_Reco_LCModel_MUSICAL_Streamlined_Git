@@ -35,7 +35,7 @@ MatlabStartupCommand="Paths = regexp(path,':','split');rmpathss = ~cellfun('isem
 export MatlabStartupCommand="${MatlabStartupCommand} x = strcat(Paths(rmpathss), {':'});x = [x{:}]; rmpath(x); end; clear Paths rmpathss x; addpath(genpath('${MatlabFunctionsFolder}'))"
 
 # tmp-folder
-tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
+tmp_folder="/ceph/nchirurg.meduniwien.ac.at/scratch/tmp_MRSI_processing/Part1"
 
 
 # Gradient Delays (measured at Vienna 7 T scanner, ~2023-10) 
@@ -45,7 +45,7 @@ export DefaultGradientDelaysForCRTTrajectory="[12.562838, 12.540197, 10.082248]"
 # LCModel Path
 export LCM_Path="/ceph/nchirurg.meduniwien.ac.at/lab/.lcmodel/bin/lcmodel"
 
-export RunLCModelOn=""		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
+export RunLCModelOn="nc1"		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
 									# computer, without needing to type in the password!
 									# BE AWARE THAT THIS COMPUTER HAS TO BE ABLE TO ACCESS THE "LCM_Path", THE BASIS-FILE AND THE "out_path"!
 export RunLCModelAs=""				# If you need to be a specific user on the LCModel computer. Leave empty (or dont declare it at all) if not necessary.

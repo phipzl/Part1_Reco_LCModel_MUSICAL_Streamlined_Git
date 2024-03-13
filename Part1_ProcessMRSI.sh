@@ -483,11 +483,10 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
 		rm -fR $out_path/TempServerDir
 		cp -R $tmp_dir/ $out_path/TempServerDir; RunFileOnServer=$out_path/TempServerDir/RunLCModel.sh; cp $curdir/RunLCModel.sh $RunFileOnServer
 		if [[ $RunLCModelAs == "" ]]; then # Run LCModel on different computer,
-			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					 # connecting via ssh. You need 
-		else		
-																																	 # a key so that you can
-			ssh -o PasswordAuthentication=no -l $RunLCModelAs $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir" # automatically connect to this computer,
-		fi																																	 # without needing to type in the password!
+			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					# connecting via ssh. You need 
+else																			 	# a key so that you can
+			ssh -o PasswordAuthentication=no -l $RunLCModelAs $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir" 		# automatically connect to this computer,
+																				# without needing to type in the password!
 		sleep 40
 		rm -fR $out_path/TempServerDir
 	fi
