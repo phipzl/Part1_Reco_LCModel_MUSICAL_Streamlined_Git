@@ -281,10 +281,17 @@ if(~FastPIReprocess_flag && exist('image','var') && ~(isfield(image.Par,'dicom_f
             Settings.NonCartReco.FlipDim = 1;
             Settings.NonCartReco.CircularSFTFoV_flag = false; 
             Settings.PreWhitenData_flag = 0;
-            if(isfield(Par.Settings,'GradientDelay'))
-                Settings.ReadInTraj.GradDelayPerTempInt_us = Par.Settings.GradientDelay;
-            end
+            if(isfield(Par.Settings,'GradientDelayPerAngInt_x') && isfield(Par.Settings,'GradientDelayPerAngInt_y'))
+                Settings.ReadInTraj.GradDelayPerAngInt_x_us = Par.Settings.GradientDelayPerAngInt_x;
+                Settings.ReadInTraj.GradDelayPerAngInt_y_us = Par.Settings.GradientDelayPerAngInt_y;
             
+            elseif(isfield(Par.Settings,'GradientDelayPerTempInt_x') && isfield(Par.Settings,'GradientDelayPerTempInt_y'))
+                Settings.ReadInTraj.GradDelayPerTempInt_x_us = Par.Settings.GradientDelayPerTempInt_x;
+                Settings.ReadInTraj.GradDelayPerTempInt_y_us = Par.Settings.GradientDelayPerTempInt_y;
+            else
+                Settings.ReadInTraj.GradDelayPerTempInt_x_us = 0;
+                Settings.ReadInTraj.GradDelayPerTempInt_y_us = 0;
+            end            
             
             image = op_ReconstructMRData(image,struct(),Settings);
           
@@ -374,9 +381,18 @@ if(~FastPIReprocess_flag && ~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_fla
         Settings.NonCartReco.Phaseroll_flag = true;
         Settings.NonCartReco.ConjIniSpace_flag = false; 
         Settings.PreWhitenData_flag = 0;
-        if(isfield(Par.Settings,'GradientDelay'))
-            Settings.ReadInTraj.GradDelayPerTempInt_us = Par.Settings.GradientDelay;
-        end
+        
+        if(isfield(Par.Settings,'GradientDelayPerAngInt_x') && isfield(Par.Settings,'GradientDelayPerAngInt_y'))
+            Settings.ReadInTraj.GradDelayPerAngInt_x_us = Par.Settings.GradientDelayPerAngInt_x;
+            Settings.ReadInTraj.GradDelayPerAngInt_y_us = Par.Settings.GradientDelayPerAngInt_y;
+
+        elseif(isfield(Par.Settings,'GradientDelayPerTempInt_x') && isfield(Par.Settings,'GradientDelayPerTempInt_y'))
+            Settings.ReadInTraj.GradDelayPerTempInt_x_us = Par.Settings.GradientDelayPerTempInt_x;
+            Settings.ReadInTraj.GradDelayPerTempInt_y_us = Par.Settings.GradientDelayPerTempInt_y;
+        else
+            Settings.ReadInTraj.GradDelayPerTempInt_x_us = 0;
+            Settings.ReadInTraj.GradDelayPerTempInt_y_us = 0;
+        end  
 
         % Reco MRSI Data
         csi = op_ReconstructMRData(csi,struct(),Settings);
@@ -403,6 +419,33 @@ if(~FastPIReprocess_flag && ~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_fla
     end
 
 end  
+
+
+%% Apply Hamming Filter to Combined MRSI Data
+size_csi = size(csi.Data);
+if(Par.Flags.hamming_flag)
+	if( ~isfield(csi.Par,'SpatialSpectralEncoding_flag') || ~csi.Par.SpatialSpectralEncoding_flag)      % For SpatialSpectralEncoding we have done it already during reco
+    
+	    fprintf('\n\nAPPLY HAMMING FILTER')  % If Full_ElliptWeighted_Or_Weighted_Acq = 4, the data is alrdy intrinsically filtered in z-dimension
+	    % Was the WeightedAcquisition undone?
+	    UndoWeightedAcq_flag = false;
+	    if(isfield(csi,'RecoSteps'))
+            fieldies = fieldnames(csi.RecoSteps); field = fieldies(~cellfun(@isempty,regexpi(fieldies,'op_AverageMRData')));
+            if(~isempty(field))
+                UndoWeightedAcq_flag = csi.RecoSteps.(field{1}).UndoWeightedAveraging_flag;
+            end
+	    end
+	    if(size_csi(3) > 1 && Par.CSI.ThreeD_flag && (Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq ~= 4 || UndoWeightedAcq_flag))      
+            csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
+        else
+            csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
+	    end 
+    elseif(isfield(csi.Par,'SpatialSpectralEncoding_flag') && csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
+        fprintf('\n\nAPPLY HAMMING FILTER IN z-DIRECTION')  % If Full_ElliptWeighted_Or_Weighted_Acq = 4, the data is alrdy intrinsically filtered in z-dimension
+		csi.Data = HammingFilter(csi.Data,[3],Par.Settings.hamming_factor,'OuterProduct',0);   
+
+	end
+end
 
 
 %% Interpolate in kSpace
@@ -512,7 +555,154 @@ size_csi(5) = size(csi.Data,5);
 %% Bilgic Lipid Decontamination
 % INSERT PRE-COIL-COMB LIPID DECONTAMINATION HERE!
 
+%% PRE COIL COMBI BILGIC LIPID SUPP
 
+
+
+if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'file'))
+
+    csi_bak = csi;
+    clear csi;
+    csi = csi_bak.Data;
+    %save([Par.Paths.out_path '/UnCombinedCSI.mat'],'csi','-v7.3');
+    %temp_x=load('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/MS_3DCRT_Berni_pipeline/test_wLukas/UnCombinedCSI.mat');
+    %temp_x=permute(temp_x.csi,[2 3 4 5 1]);
+    %csi=temp_x;
+    csi=csi*100; % It scales csi data similarly like with Lukas's pipeline --> it makes the L2 work with the same factor
+    fprintf('\n\nPerform Bilgic Lipid Decontamination: channelwise & sensitivity-weighted\n')
+
+    mkdir([Par.Paths.out_path '/LipidDecontamination'])
+    mkdir([Par.Paths.out_path '/LipidMaskNii'])
+
+    x_dim=size(csi,1);
+    y_dim=size(csi,2);
+    z_dim=size(csi,3);
+
+    lipid_mask_total=zeros(x_dim,y_dim,z_dim);
+
+    f_range=size(csi,4);
+    f_range_start=ceil(f_range*0.82);
+    f_range_end=ceil(f_range*0.96);
+
+    Text=sprintf('\n\nVectorsize Points of the csi go from 0 to %d!',f_range);
+    disp(Text)
+    Text=sprintf('\nRemoving Lipids in the Range from %d to %d:\n',f_range_start,f_range_end);
+    disp(Text)
+
+    for nCha = 1:size(csi,5)     
+
+        csi_temp = squeeze_single_dim(csi(:,:,:,:,nCha),5); 
+        csi_lip = fftshift(fft(csi_temp(:,:,:,:),[],4),4);
+
+        for a=1:x_dim
+            for b=1:y_dim
+                for c=1:z_dim
+                       ftspectra(a,b,c,:)=abs((fftshift(fft(csi_temp(a,b,c,:)))));
+                       ftspectramax(a,b,c)=max(ftspectra(a,b,c,f_range_start:f_range_end));
+                end
+            end
+        end
+
+        max_sig=0.30*max(ftspectramax(:));
+        sens=ftspectramax;
+        sens(sens<max_sig)=0;
+        sens(sens~=0)=1;
+        lipid_mask=sens;
+
+        struct_elm=strel('disk',1,0);
+        tumor_mask=imerode(mask,struct_elm);
+        lipid_mask=lipid_mask-tumor_mask;
+        lipid_mask(lipid_mask~=1)=0;
+
+        struct_elm=strel('disk',6,0);
+        corner_mask=imdilate(mask,struct_elm);
+        corner_mask(corner_mask~=1)=2;
+        corner_mask(corner_mask~=2)=0;
+        corner_mask(corner_mask~=0)=1;
+
+        lipid_mask=lipid_mask-corner_mask;
+        lipid_mask(lipid_mask~=1)=0;
+
+        lipid_mask_total=lipid_mask_total+lipid_mask;
+
+        save(sprintf('%s/LipidMaskNii/lipid_mask_chn_%d.mat',Par.Paths.out_path,nCha),'lipid_mask');  
+
+        mkdir([sprintf('%s/LipidDecontamination/Channel_%d', Par.Paths.out_path,nCha)])
+
+        for Slc = 1:size(csi_temp,3)
+            Lipid_fig = figure('visible','on');
+            imagesc(squeeze(lipid_mask(:,:,Slc)),[0 1])
+            colorbar;      
+            saveas(Lipid_fig,sprintf('%s/LipidDecontamination/Channel_%d/lipid_mask_slc_%d', Par.Paths.out_path,nCha,Slc),'epsc2')
+            saveas(Lipid_fig,sprintf('%s/LipidDecontamination/Channel_%d/lipid_mask_slc_%d', Par.Paths.out_path,nCha,Slc),'fig')            
+            close(Lipid_fig)
+
+            Brain_fig = figure('visible','on');
+            imagesc(squeeze(abs(csi(:,:,Slc,1,nCha))),[0 max_sig])
+            colorbar;      
+            saveas(Brain_fig,sprintf('%s/LipidDecontamination/Channel_%d/brain_mask_slc_%d', Par.Paths.out_path,nCha,Slc),'epsc2')
+            saveas(Brain_fig,sprintf('%s/LipidDecontamination/Channel_%d/brain_mask_slc_%d', Par.Paths.out_path,nCha,Slc),'fig')
+            close(Brain_fig)
+        end
+
+        fprintf('Decontaminating channel %d\n', nCha)    
+
+        for Slc = 1:size(csi_temp,3)
+
+            % Prepare slices: Get slice csi data, Extract Relevant Lipids, Get slice mask
+            csi_slc = fftshift(fft(squeeze_single_dim(csi_temp(:,:,Slc,:),3),[],3),3);
+
+                % Get L2 Parameter
+                param.beta =  Par.Settings.LipidDecon_L2BetaCorrFactor * 10^-15; 
+		
+                % Get L2 Lipids
+                if(1)%Par.CSI.ThreeD_flag || 1)
+                    param.Lipid = [];
+                    for SlcAlias = 1:size(csi_temp,3)
+                        param.Lipid = cat(1, param.Lipid, get_LipidBasis(squeeze(csi_lip(:,:,SlcAlias,:)),lipid_mask(:,:,SlcAlias)));
+                    end
+                else
+                    param.Lipid = get_LipidBasis(csi_slc,lipid_mask(:,:,Slc));
+                end
+
+                param.Lipid = transpose(param.Lipid);
+
+                % Get L2 Brainmask
+                if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)
+                    param.Bmask = mask_BefInterpol(:,:,Slc);
+                else
+                    param.Bmask = mask(:,:,Slc);            
+                end
+
+            % L2 Regularization
+            csi_slc = LipidDecon_L2(csi_slc,param);
+            csi(:,:,Slc,:,nCha) = ifft(fftshift(csi_slc,3),[],3);
+
+        end
+
+        clear csi_slc csi_lip sens Slc SlcAlias lipid_mask param
+
+    end
+
+    save(sprintf('%s/LipidMaskNii/lipid_mask_total.mat',Par.Paths.out_path),'lipid_mask_total'); 
+
+    mkdir([sprintf('%s/LipidDecontamination/Total', Par.Paths.out_path)])    
+
+    for Slc = 1:size(csi_temp,3)
+            Lipid_fig_total = figure('visible','on');
+            imagesc(squeeze(lipid_mask_total(:,:,Slc)),[0 nCha])
+            colorbar;      
+            saveas(Lipid_fig_total,sprintf('%s/LipidDecontamination/Total/lipid_mask_total_slc_%d', Par.Paths.out_path,Slc),'epsc2')
+            saveas(Lipid_fig_total,sprintf('%s/LipidDecontamination/Total/lipid_mask_total_slc_%d', Par.Paths.out_path,Slc),'fig')            
+            close(Lipid_fig_total)
+    end    
+
+    csi_bak.Data = csi;
+    csi = csi_bak;
+    clear csi_bak;
+    
+    
+end   
 
 
   
@@ -643,174 +833,174 @@ end
 
 %% 14. Bilgic Lipid Decontamination
 
-% HackForNow:
-csiBak = csi;
-csi = csi.Data;
-
-if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'file'))
-	fprintf('\n\nPerform Bilgic Lipid Decontamination.')
-
-% MASK
-	if(exist([tmp_dir '/mask_lipid.raw'],'file'))
-		fid_mask_lipid = fopen([tmp_dir '/mask_lipid.raw'],'r');
-        mask_lipid = reshape(fread(fid_mask_lipid, 'float'), [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nSLC*Par.CSI.nPartEnc]);
-        fclose(fid_mask_lipid);
-
-		if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)  % If we do image-domain interpol --> haven't done interpol yet
-			fid_mask_lipid = fopen([tmp_dir '/mask_lipid_BefInterpol.raw'],'r');
-			mask_lipid_BefInterpol = reshape(fread(fid_mask_lipid, 'float'), [Par.CSI.nFreqEnc_BefInterpol Par.CSI.nPhasEnc_BefInterpol Par.CSI.nSLC_BefInterpol*Par.CSI.nPartEnc_BefInterpol]);
-			fclose(fid_mask_lipid);				
-            mask_lipid = mask_lipid_BefInterpol;
+% % HackForNow:
+% csiBak = csi;
+% csi = csi.Data;
+% 
+% if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'file'))
+% 	fprintf('\n\nPerform Bilgic Lipid Decontamination.')
+% 
+% % MASK
+% 	if(exist([tmp_dir '/mask_lipid.raw'],'file'))
+% 		fid_mask_lipid = fopen([tmp_dir '/mask_lipid.raw'],'r');
+%         mask_lipid = reshape(fread(fid_mask_lipid, 'float'), [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nSLC*Par.CSI.nPartEnc]);
+%         fclose(fid_mask_lipid);
+% 
+% 		if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)  % If we do image-domain interpol --> haven't done interpol yet
+% 			fid_mask_lipid = fopen([tmp_dir '/mask_lipid_BefInterpol.raw'],'r');
+% 			mask_lipid_BefInterpol = reshape(fread(fid_mask_lipid, 'float'), [Par.CSI.nFreqEnc_BefInterpol Par.CSI.nPhasEnc_BefInterpol Par.CSI.nSLC_BefInterpol*Par.CSI.nPartEnc_BefInterpol]);
+% 			fclose(fid_mask_lipid);				
+%             mask_lipid = mask_lipid_BefInterpol;
+% %         else
+% % 			mask_lipid_BefInterpol = mask_lipid;
+% 
+% 		end
+% 
+% 		if(sum(sum(sum(mask_lipid))) == 0)
+% 			mask_lipid = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
+% 		end
 %         else
-% 			mask_lipid_BefInterpol = mask_lipid;
-
-		end
-
-		if(sum(sum(sum(mask_lipid))) == 0)
-			mask_lipid = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
-		end
-	else
-		mask_lipid = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
-
-	end
-
-	% Lipid Mask
-	lipid_mask = mask_lipid;
-	%lipid_mask = lipid_mask .* ~mask_BefInterpol;
-
-	mkdir([Par.Paths.out_path '/LipidDecontamination'])					% mod stuff gives 1 if true, and 2 if false.
-	fiddy = fopen(sprintf('%s/LipidDecontamination/UsedL%dNorm.txt',Par.Paths.out_path,Par.Flags.LipidDecon_L1_flag + mod(2,Par.Flags.LipidDecon_L1_flag)),'w+'); 
-	fclose(fiddy); 
-
-	for Slc = 1:size(csi,3)
-%		Scaling_fig = figure('visible','off');
-%		imagesc(1./squeeze(scaling_inv(:,:,Slc,1)),[0 5/scaling_inv(ceil(size(scaling_inv,1)/2),ceil(size(scaling_inv,2)/2),1,1) ])
+% 		mask_lipid = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
+% 
+% 	end
+% 
+% 	% Lipid Mask
+% 	lipid_mask = mask_lipid;
+% 	%lipid_mask = lipid_mask .* ~mask_BefInterpol;
+% 
+% 	mkdir([Par.Paths.out_path '/LipidDecontamination'])					% mod stuff gives 1 if true, and 2 if false.
+% 	fiddy = fopen(sprintf('%s/LipidDecontamination/UsedL%dNorm.txt',Par.Paths.out_path,Par.Flags.LipidDecon_L1_flag + mod(2,Par.Flags.LipidDecon_L1_flag)),'w+'); 
+% 	fclose(fiddy); 
+% 
+% 	for Slc = 1:size(csi,3)
+% %		Scaling_fig = figure('visible','off');
+% %		imagesc(1./squeeze(scaling_inv(:,:,Slc,1)),[0 5/scaling_inv(ceil(size(scaling_inv,1)/2),ceil(size(scaling_inv,2)/2),1,1) ])
+% %		colorbar;
+% %		saveas(Scaling_fig,sprintf('%s/LipidDecontamination/scaling_slc%d', Par.Paths.out_path,Slc),'epsc2')
+% %		saveas(Scaling_fig,sprintf('%s/LipidDecontamination/scaling_slc%d', Par.Paths.out_path,Slc),'fig')
+% %		close(Scaling_fig)
+% 
+% 		Lipid_fig = figure('visible','off');
+% 		imagesc(squeeze(lipid_mask(:,:,Slc)),[0 1])
 %		colorbar;
-%		saveas(Scaling_fig,sprintf('%s/LipidDecontamination/scaling_slc%d', Par.Paths.out_path,Slc),'epsc2')
-%		saveas(Scaling_fig,sprintf('%s/LipidDecontamination/scaling_slc%d', Par.Paths.out_path,Slc),'fig')
-%		close(Scaling_fig)
-
-		Lipid_fig = figure('visible','off');
-		imagesc(squeeze(lipid_mask(:,:,Slc)),[0 1])
-		colorbar;
-		saveas(Lipid_fig,sprintf('%s/LipidDecontamination/lipid_mask_slc%d', Par.Paths.out_path,Slc),'epsc2')
-		saveas(Lipid_fig,sprintf('%s/LipidDecontamination/lipid_mask_slc%d', Par.Paths.out_path,Slc),'fig')
-		close(Lipid_fig)	
-	end
-
-	param.beta = NaN;
-	csi_lip = fftshift(fft(squeeze(csi(:,:,:,:)),[],4),4);
-	for Slc = 1:size(csi,3)
-		
-		% Prepare slices: Get slice csi data, Extract Relevant Lipids, Get slice mask
-		fprintf('\n\nDecontaminating slice %d', Slc)
-		csi_slc = squeeze(csi(:,:,Slc,:));
-		
-		csi_slc = fftshift(fft(csi_slc,[],3),3);
-		
-
-        if(Par.Flags.SliceParallelImaging_flag == 1)
-						
-			[y, x] = find(Slc == Par.Settings.SliceAliasingPattern);
-			AccessSlc = Par.Settings.SliceAliasingPattern(y,:);
-			param.Lipid = [];
-			for SlcAlias = AccessSlc
-				if(SlcAlias ~= Slc)
-					LipAliasMask = lipid_mask(:,:,SlcAlias);
-					LipAliasMask = reshape(LipAliasMask, [1 size(LipAliasMask)]);
-					LipAliasMask1_k = FFTOfMRIData(LipAliasMask,0,[2 3],1);
-					FoVShift = cat(2,Par.Settings.FoVShifts_x(SlcAlias)-Par.Settings.FoVShifts_x(Slc),Par.Settings.FoVShifts_y(SlcAlias)-Par.Settings.FoVShifts_y(Slc));
-					LipAliasMask1 = kSpace_FoVShift(LipAliasMask1_k,FoVShift);
-					LipAliasMask1 = FFTOfMRIData(LipAliasMask1,0,[2 3],0);
-					LipAliasMask_From2To1 = (LipAliasMask1) .* reshape(mask(:,:,Slc), [1 size(mask,1) size(mask,2)]);
-					LipAliasMask_From2To1_k = FFTOfMRIData(LipAliasMask_From2To1,0,[2 3],1);
-					LipAliasMask_From2To1_Final = kSpace_FoVShift(LipAliasMask_From2To1_k,-FoVShift);
-					LipAliasMask_From2To1_Final = abs(squeeze(FFTOfMRIData(LipAliasMask_From2To1_Final,0,[2 3],0)));
-					LipAliasMask_From2To1_Final(LipAliasMask_From2To1_Final <= 0.5) = 0; 
-					LipAliasMask_From2To1_Final(LipAliasMask_From2To1_Final > 0.5) = 1; 
-				else
-					LipAliasMask_From2To1_Final = lipid_mask(:,:,SlcAlias);
-				end
-				param.Lipid = cat(1,   param.Lipid,get_LipidBasis(squeeze(csi_lip(:,:,SlcAlias,:)), LipAliasMask_From2To1_Final)   );
-			end
-			clear x y AccessSlc SlcAlias;
-%         elseif(Par.CSI.ThreeD_flag)
+% 		saveas(Lipid_fig,sprintf('%s/LipidDecontamination/lipid_mask_slc%d', Par.Paths.out_path,Slc),'epsc2')
+% 		saveas(Lipid_fig,sprintf('%s/LipidDecontamination/lipid_mask_slc%d', Par.Paths.out_path,Slc),'fig')
+% 		close(Lipid_fig)	
+% 	end
+% 
+% 	param.beta = NaN;
+% 	csi_lip = fftshift(fft(squeeze(csi(:,:,:,:)),[],4),4);
+% 	for Slc = 1:size(csi,3)
+% 		
+% 		% Prepare slices: Get slice csi data, Extract Relevant Lipids, Get slice mask
+% 		fprintf('\n\nDecontaminating slice %d', Slc)
+% 		csi_slc = squeeze(csi(:,:,Slc,:));
+% 		
+% 		csi_slc = fftshift(fft(csi_slc,[],3),3);
+% 		
+% 
+%         if(Par.Flags.SliceParallelImaging_flag == 1)
+% 						
+% 			[y, x] = find(Slc == Par.Settings.SliceAliasingPattern);
+% 			AccessSlc = Par.Settings.SliceAliasingPattern(y,:);
 %             param.Lipid = [];
-%             for SlcAlias = 1:size(csi,3)
-%                 param.Lipid = cat(1,   param.Lipid,get_LipidBasis(squeeze(csi_lip(:,:,SlcAlias,:)), lipid_mask(:,:,SlcAlias))   );            
+% 			for SlcAlias = AccessSlc
+% 				if(SlcAlias ~= Slc)
+% 					LipAliasMask = lipid_mask(:,:,SlcAlias);
+% 					LipAliasMask = reshape(LipAliasMask, [1 size(LipAliasMask)]);
+% 					LipAliasMask1_k = FFTOfMRIData(LipAliasMask,0,[2 3],1);
+% 					FoVShift = cat(2,Par.Settings.FoVShifts_x(SlcAlias)-Par.Settings.FoVShifts_x(Slc),Par.Settings.FoVShifts_y(SlcAlias)-Par.Settings.FoVShifts_y(Slc));
+% 					LipAliasMask1 = kSpace_FoVShift(LipAliasMask1_k,FoVShift);
+% 					LipAliasMask1 = FFTOfMRIData(LipAliasMask1,0,[2 3],0);
+% 					LipAliasMask_From2To1 = (LipAliasMask1) .* reshape(mask(:,:,Slc), [1 size(mask,1) size(mask,2)]);
+% 					LipAliasMask_From2To1_k = FFTOfMRIData(LipAliasMask_From2To1,0,[2 3],1);
+% 					LipAliasMask_From2To1_Final = kSpace_FoVShift(LipAliasMask_From2To1_k,-FoVShift);
+% 					LipAliasMask_From2To1_Final = abs(squeeze(FFTOfMRIData(LipAliasMask_From2To1_Final,0,[2 3],0)));
+% 					LipAliasMask_From2To1_Final(LipAliasMask_From2To1_Final <= 0.5) = 0; 
+% 					LipAliasMask_From2To1_Final(LipAliasMask_From2To1_Final > 0.5) = 1; 
+% 				else
+% 					LipAliasMask_From2To1_Final = lipid_mask(:,:,SlcAlias);
 %             end
-        else
-			param.Lipid = get_LipidBasis(csi_slc,lipid_mask(:,:,Slc));
-        end
-		
-        if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)
-            param.Bmask = mask_BefInterpol(:,:,Slc);
-        else
-            param.Bmask = mask(:,:,Slc);            
-        end
-		
-		% L1 or L2
-        if(Par.Flags.LipidDecon_L1_flag)
-			
-			
-			% L1 
-			if(Slc == 1)
-				param_old = param; load('./Bilgic_param_template.mat'); param.Bmask=param_old.Bmask;param.Lipid=param_old.Lipid; param.beta=param_old.beta;
-				size_csi_bilgic = size(csi);
-				% Elliptical Filter Mask (zf necessary???)
-				EllipticalWMask = repmat(EllipticalFilter(ones(size(csi,1),size(csi,2)),[1 2],[1 1 1 size(csi,1)/2+1],1),[1 1 size_csi_bilgic(4)]);
-				param.FT = FT_v2(EllipticalWMask);	
-			end
-			param.data =  param.FT*csi_slc;
-
-			for t = 1:Par.Settings.LipidDecon_NoOfLoops
-				fprintf('\nDecontamination Loop %d of %d. Norm Results:\n',t,Par.Settings.LipidDecon_NoOfLoops)
-				csi_slc = lipid_suppression(csi_slc,param);
-			end
-		else
-			
-			
-			% L2
-			param.beta =  Par.Settings.LipidDecon_L2BetaCorrFactor * 10^-15; 
-			param.Lipid = transpose(param.Lipid);
-			csi_slc = LipidDecon_L2(csi_slc,param);
-        end
-		
-		
-		
-		
-		
-		csi(:,:,Slc,:) = ifft(fftshift(csi_slc,3),[],3);
-	end
-
-	%gh save lipid mask!
-	param_beta = param.beta;
-	save([Par.Paths.out_path '/LipidDecontamination/Lipid_mask.mat'], 'lipid_mask','param_beta');
-
-	clear csi_slc param EllipticalWMask size_csi_bilgic Scaling_fig Lipid_fig scaling_inv2 lipid_mask Slc t param_beta
-
-	% % For Visualization
-	% % Lipid Decon
-	% csi_LipidDecon = csi;
-	% csi_fft = fftshift(fft(csi_LipidDecon,[],3),3);
-	% for t = 1:10
-	%     csi_LipidDecon = lipid_suppression(csi_LipidDecon,param);
-	%     csi_LipidDecon_fft = fftshift(fft(csi_LipidDecon,[],3),3);
-	%     figure;
-	%     imagesc( [ mask.*squeeze(sum(abs(csi_fft(:,:,1199:1559)),3))  mask.*squeeze(sum(abs(csi_LipidDecon(:,:,1199:1559)),3))] ), ...
-	%     axis image, colorbar, drawnow
-	%     title(['t = ' num2str(t)] )
+% 				param.Lipid = cat(1,   param.Lipid,get_LipidBasis(squeeze(csi_lip(:,:,SlcAlias,:)), LipAliasMask_From2To1_Final)   );
 	% end
-
-	% lipid_noLipidDecon = abs(fftshift(fft(csi,[],3),3));
-	% lipid_noLipidDecon = squeeze(sum(lipid_noLipidDecon(:,:,1199:1559),3));
+% 			clear x y AccessSlc SlcAlias;
+% %         elseif(Par.CSI.ThreeD_flag)
+% %             param.Lipid = [];
+% %             for SlcAlias = 1:size(csi,3)
+% %                 param.Lipid = cat(1,   param.Lipid,get_LipidBasis(squeeze(csi_lip(:,:,SlcAlias,:)), lipid_mask(:,:,SlcAlias))   );            
+% %             end
+%         else
+% 			param.Lipid = get_LipidBasis(csi_slc,lipid_mask(:,:,Slc));
+%         end
 	% 
-	% lipid_LipidDecon = abs(fftshift(fft(csi_LipidDecon,[],3),3));
-	% lipid_LipidDecon = squeeze(sum(lipid_LipidDecon(:,:,1199:1559),3));
-
-end
-
-csiBak.Data = csi; csi = csiBak; clear csiBak;
+%         if(Par.Flags.InterpolateCSIResolution_flag && ~Par.Settings.InterpolateCSIResolution_InkSpace)
+%             param.Bmask = mask_BefInterpol(:,:,Slc);
+%         else
+%             param.Bmask = mask(:,:,Slc);            
+%         end
+% 		
+% 		% L1 or L2
+%         if(Par.Flags.LipidDecon_L1_flag)
+% 			
+% 			
+% 			% L1 
+% 			if(Slc == 1)
+% 				param_old = param; load('./Bilgic_param_template.mat'); param.Bmask=param_old.Bmask;param.Lipid=param_old.Lipid; param.beta=param_old.beta;
+% 				size_csi_bilgic = size(csi);
+% 				% Elliptical Filter Mask (zf necessary???)
+% 				EllipticalWMask = repmat(EllipticalFilter(ones(size(csi,1),size(csi,2)),[1 2],[1 1 1 size(csi,1)/2+1],1),[1 1 size_csi_bilgic(4)]);
+% 				param.FT = FT_v2(EllipticalWMask);	
+% 			end
+% 			param.data =  param.FT*csi_slc;
+% 
+% 			for t = 1:Par.Settings.LipidDecon_NoOfLoops
+% 				fprintf('\nDecontamination Loop %d of %d. Norm Results:\n',t,Par.Settings.LipidDecon_NoOfLoops)
+% 				csi_slc = lipid_suppression(csi_slc,param);
+% 			end
+% 		else
+% 			
+% 			
+% 			% L2
+% 			param.beta =  Par.Settings.LipidDecon_L2BetaCorrFactor * 10^-15; 
+% 			param.Lipid = transpose(param.Lipid);
+% 			csi_slc = LipidDecon_L2(csi_slc,param);
+%         end
+% 		
+% 		
+% 		
+% 		
+% 		
+% 		csi(:,:,Slc,:) = ifft(fftshift(csi_slc,3),[],3);
+% 	end
+% 
+% 	%gh save lipid mask!
+% 	param_beta = param.beta;
+% 	save([Par.Paths.out_path '/LipidDecontamination/Lipid_mask.mat'], 'lipid_mask','param_beta');
+% 
+% 	clear csi_slc param EllipticalWMask size_csi_bilgic Scaling_fig Lipid_fig scaling_inv2 lipid_mask Slc t param_beta
+% 
+% 	% % For Visualization
+% 	% % Lipid Decon
+% 	% csi_LipidDecon = csi;
+% 	% csi_fft = fftshift(fft(csi_LipidDecon,[],3),3);
+% 	% for t = 1:10
+% 	%     csi_LipidDecon = lipid_suppression(csi_LipidDecon,param);
+% 	%     csi_LipidDecon_fft = fftshift(fft(csi_LipidDecon,[],3),3);
+% 	%     figure;
+% 	%     imagesc( [ mask.*squeeze(sum(abs(csi_fft(:,:,1199:1559)),3))  mask.*squeeze(sum(abs(csi_LipidDecon(:,:,1199:1559)),3))] ), ...
+% 	%     axis image, colorbar, drawnow
+% 	%     title(['t = ' num2str(t)] )
+% 	% end
+% 
+% 	% lipid_noLipidDecon = abs(fftshift(fft(csi,[],3),3));
+% 	% lipid_noLipidDecon = squeeze(sum(lipid_noLipidDecon(:,:,1199:1559),3));
+% 	% 
+% 	% lipid_LipidDecon = abs(fftshift(fft(csi_LipidDecon,[],3),3));
+% 	% lipid_LipidDecon = squeeze(sum(lipid_LipidDecon(:,:,1199:1559),3));
+% 
+% end
+% 
+% csiBak.Data = csi; csi = csiBak; clear csiBak;
 
 
 %% Frequency Alignment
@@ -876,30 +1066,30 @@ if(Par.Flags.NuisRem_flag == 1)
 end
 
 
-%% Apply Hamming Filter to Combined MRSI Data
-
-if(Par.Flags.hamming_flag)
-	if( ~isfield(csi.Par,'SpatialSpectralEncoding_flag') || ~csi.Par.SpatialSpectralEncoding_flag)      % For SpatialSpectralEncoding we have done it already during reco
-    
-	    fprintf('\n\nAPPLY HAMMING FILTER')  % If Full_ElliptWeighted_Or_Weighted_Acq = 4, the data is alrdy intrinsically filtered in z-dimension
-	    % Was the WeightedAcquisition undone?
-	    UndoWeightedAcq_flag = false;
-	    if(isfield(csi,'RecoSteps'))
-            fieldies = fieldnames(csi.RecoSteps); field = fieldies(~cellfun(@isempty,regexpi(fieldies,'op_AverageMRData')));
-            if(~isempty(field))
-                UndoWeightedAcq_flag = csi.RecoSteps.(field{1}).UndoWeightedAveraging_flag;
-            end
-	    end
-	    if(size_csi(3) > 1 && Par.CSI.ThreeD_flag && (Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq ~= 4 || UndoWeightedAcq_flag))      
-            csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
-        else
-            csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
-	    end 
-    elseif(isfield(csi.Par,'SpatialSpectralEncoding_flag') && csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
-		csi.Data = HammingFilter(csi.Data,[3],Par.Settings.hamming_factor,'OuterProduct',0);   
-
-	end
-end
+% %% Apply Hamming Filter to Combined MRSI Data
+% 
+% if(Par.Flags.hamming_flag)
+% 	if( ~isfield(csi.Par,'SpatialSpectralEncoding_flag') || ~csi.Par.SpatialSpectralEncoding_flag)      % For SpatialSpectralEncoding we have done it already during reco
+%     
+% 	    fprintf('\n\nAPPLY HAMMING FILTER')  % If Full_ElliptWeighted_Or_Weighted_Acq = 4, the data is alrdy intrinsically filtered in z-dimension
+% 	    % Was the WeightedAcquisition undone?
+% 	    UndoWeightedAcq_flag = false;
+% 	    if(isfield(csi,'RecoSteps'))
+%             fieldies = fieldnames(csi.RecoSteps); field = fieldies(~cellfun(@isempty,regexpi(fieldies,'op_AverageMRData')));
+%             if(~isempty(field))
+%                 UndoWeightedAcq_flag = csi.RecoSteps.(field{1}).UndoWeightedAveraging_flag;
+%             end
+% 	    end
+% 	    if(size_csi(3) > 1 && Par.CSI.ThreeD_flag && (Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq ~= 4 || UndoWeightedAcq_flag))      
+%             csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
+%         else
+%             csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
+% 	    end 
+%     elseif(isfield(csi.Par,'SpatialSpectralEncoding_flag') && csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
+% 		csi.Data = HammingFilter(csi.Data,[3],Par.Settings.hamming_factor,'OuterProduct',0);   
+% 
+% 	end
+% end
 
 
 %% DEBUG MODE: SHOW UNHAMMINGED AND HAMMINGED MAGNITUDE
@@ -1315,7 +1505,7 @@ fprintf('\n\nThe MRSI Pre-Processing and LCModel preparations took %10.6f s.\n',
 clearvars -except Par csi weights image image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef
 
 if(~IsWatRef)		% No need to save water reference
-	save([Par.Paths.out_path '/CombinedCSI.mat'])
+	save([Par.Paths.out_path '/CombinedCSI.mat'], '-v7.3')
 end
 
 

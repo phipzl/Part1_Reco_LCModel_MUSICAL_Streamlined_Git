@@ -55,10 +55,13 @@ elseif(Par.Flags.image_VC_flag)                                                 
 else
 	Sett.NonCartReco.CircularSFTFoV_flag = true; 
     Sett.NonCartReco.Phaseroll_flag = false;
+    Sett.ReadIn.OmitDataSets = 'ONLINE';
     [MRSI,RefScan] = op_ReadAndRecoSiemensData(Par.Paths.csi_path,NonCartTrajFile_path,[],Sett);
-	if(~isempty(fieldnames(RefScan)))
+	if(isfield(RefScan,'Data'))
         magnitude = RefScan.Data(:,:,:,1,:,:,:);
     else
+        Sett.ReadIn.OmitDataSets = {};
+        [MRSI] = op_ReadAndRecoSiemensData(Par.Paths.csi_path,NonCartTrajFile_path,[],Sett);
         UseCSIForMagnitude_flag = true;
         magnitude = MRSI.Data(:,:,:,5,:,:,:);        
 	end

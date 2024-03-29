@@ -112,6 +112,28 @@ if(Par.Flags.LipidDecon_flag == 1)
 end
 
 
+if(Par.Flags.GradientDelay_flag == 1)
+
+    if(~isempty(regexp(Par.Settings.GradientDelay,'PerAngInt','ONCE')))
+        Tmp = regexp(Par.Settings.GradientDelay,'GradDelayPerAngInt_x = \[\d+.+?\]','match'); % match GradDelayPerAngInt_x = [At least one digit then something at least once, but as few characters as neccessary (specified by ?), and then ]
+        Tmp2 = regexp(Tmp{1},'\[.*\]','match');
+        Par.Settings.GradientDelayPerAngInt_x = str2num(Tmp2{1});
+        Tmp = regexp(Par.Settings.GradientDelay,'GradDelayPerAngInt_y = \[\d+.+?\]','match'); % match GradDelayPerAngInt_x = [At least one digit then something at least once, but as few characters as neccessary (specified by ?), and then ]
+        Tmp2 = regexp(Tmp{1},'\[.*\]','match');
+        Par.Settings.GradientDelayPerAngInt_y = str2num(Tmp2{1});
+    elseif(~isempty(regexp(Par.Settings.GradientDelay,'PerTempInt','ONCE')))
+        Tmp = regexp(Par.Settings.GradientDelay,'GradDelayPerTempInt_x = \[\d+.+?\]','match'); % match GradDelayPerAngInt_x = [At least one digit then something at least once, but as few characters as neccessary (specified by ?), and then ]
+        Tmp2 = regexp(Tmp{1},'\[.*\]','match');
+        Par.Settings.GradientDelayPerTempInt_x = str2num(Tmp2{1});
+        Tmp = regexp(Par.Settings.GradientDelay,'GradDelayPerTempInt_y = \[\d+.+?\]','match'); % match GradDelayPerAngInt_x = [At least one digit then something at least once, but as few characters as neccessary (specified by ?), and then ]
+        Tmp2 = regexp(Tmp{1},'\[.*\]','match');
+        Par.Settings.GradientDelayPerTempInt_y = str2num(Tmp2{1});        
+    end
+end
+
+
+
+
 Par.Flags.ESPIRiT_flag = false;
 if(Par.Flags.image_normal_flag)
     if(~isempty(regexpi(Par.Paths.image_normal_path{1},'espirit,','match')))

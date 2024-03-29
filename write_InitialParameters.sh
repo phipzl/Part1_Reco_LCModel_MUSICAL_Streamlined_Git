@@ -162,7 +162,7 @@ if [[ $DebugAdditionalInput_flag -eq 1 ]]; then
 	echo "DebugAdditionalInput = '${DebugAdditionalInput}';" >> $Par
 fi
 if [[ $GradientDelay_flag -eq 1 ]]; then
-	echo "GradientDelay = ${GradientDelay};" >> $Par
+	echo "GradientDelay = '${GradientDelay}';" >> $Par
 else
 	echo "GradientDelay = 0;" >> $Par
 fi
