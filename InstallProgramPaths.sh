@@ -16,13 +16,13 @@
 
 # MATLAB 
 #export matlabp='/usr/local/matlab78/bin/matlab'
-export matlabp='/bilbo/usr/local/matlab2017b/bin/matlab'
+export matlabp='/usr/local/bin/matlab'
 
 # Brain extraction tool (bet)
-export betp='/usr/local/fsl/bin/bet'
+export betp='/ceph/nchirurg.meduniwien.ac.at/imaging/Software/fsl/bin/bet'
 
 # Install Minc-Tools or include all the paths so that the script knows rawtominc, mincmath, dcm2mnc etc.
- . /opt/minc/minc-toolkit-config.sh
+ . /opt/minc/1.9.17/minc-toolkit-config.sh
 
 # MATLAB Functions Folder
 LocalMatDir=`pwd`
@@ -35,7 +35,7 @@ MatlabStartupCommand="Paths = regexp(path,':','split');rmpathss = ~cellfun('isem
 export MatlabStartupCommand="${MatlabStartupCommand} x = strcat(Paths(rmpathss), {':'});x = [x{:}]; rmpath(x); end; clear Paths rmpathss x; addpath(genpath('${MatlabFunctionsFolder}'))"
 
 # tmp-folder
-tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
+export tmp_folder="/ceph/nchirurg.meduniwien.ac.at/imaging_scratch/tmp_MRSI_processing/Part1"
 
 
 # Gradient Delays (measured at Vienna 7 T scanner, ~2023-10) 
@@ -43,9 +43,12 @@ export DefaultGradientDelaysForCRTTrajectory="[12.562838, 12.540197, 10.082248]"
 
 
 # LCModel Path
-export LCM_Path="/usr/local/lcmodel/bin/lcmodel"
+export LCM_Path="/ceph/nchirurg.meduniwien.ac.at/lab/.lcmodel/bin/lcmodel"
 
-export RunLCModelOn="lcm"		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
+export RunLCModelOn="nc1"		# Run LCModel on different computer, connecting via ssh. You need a key so that you can automatically connect to this
 									# computer, without needing to type in the password!
 									# BE AWARE THAT THIS COMPUTER HAS TO BE ABLE TO ACCESS THE "LCM_Path", THE BASIS-FILE AND THE "out_path"!
 export RunLCModelAs=""				# If you need to be a specific user on the LCModel computer. Leave empty (or dont declare it at all) if not necessary.
+
+
+export rawtomincp="/opt/minc/1.9.17/bin/rawtominc"
