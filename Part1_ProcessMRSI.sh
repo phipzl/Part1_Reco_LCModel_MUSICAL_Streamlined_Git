@@ -88,7 +88,7 @@ cd "$( dirname "${BASH_SOURCE[0]}" )"
 
 # -1.3 Create directories
 if [[ ${tmp_folder} == "" ]]; then
-	tmp_folder="/ceph/mri.meduniwien.ac.at/scratch/radiology/nobackup/tmp_MRSI_processing/Part1"
+	tmp_folder="/ceph/nchirurg.meduniwien.ac.at/imaging_scratch/tmp_MRSI_processing/Part1"
 fi
 
 tmp_trunk="tmp"
@@ -329,7 +329,7 @@ optional:
 -p	[prior_knowledge dir]	define directory that contains Extra maps (i.e., 0_pha_map.mnc, 1_pha_map.mnc, shift_map.mnc). THIS WORKS ONLY FOR USING MEGA-OFF PRIOR KNOWLEDGE FOR MEGA-DIFF-FITTING (because 180 deg is added to the 0-order phases)
 -s	[NonCartTrajFile_path]	Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
 -D	[DebugAdditionalInput]	A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
--G	[ GradientDelay]	Gradient delay in us for CRT sequence. Not used if a mat file is provided with flag \"-s\", and only used for CRT trajectories (so far). The gradient delay can be one number overall, or specified per temporal interleaf (CAUTION: Not per physical gradient axis). 
+-G	[GradDelayPerAngInt_x = [...], GradDelayPerAngInt_y = [...] or GradDelayPerTempInt_x = [...], GradDelayPerTempInt_y = [...]]	Gradient delay in microseconds for CRT sequence. Not used if a mat file is provided with flag \"-s\", and only used for CRT trajectories (so far). The gradient delay can be specified per temporal interleaf (use GradDelayPerTempInt_x/y = ... then), or per angular interleaf (use GradDelayPerAngInt_x/y = ... then). You can specify only one number for x and y, which will then be used for all angular interleaves. If -G is not used no gradient delay is used. If -G \"Default\" or \"\" is used the default values written in InstallProgramPaths.sh are used.
 
 " $(basename $0) >&2
 
@@ -376,10 +376,12 @@ mkdir -p ${out_path}/scalings
 
 
 # Set kSpaceCorrection to Default value written in InstallProgramPaths.sh
-if [[ $GradientDelay_flag -eq 0 ]]; then
-	if [ ! -z "$DefaultGradientDelaysForCRTTrajectory" ]; then 
-		export  GradientDelay_flag=1
-		export  GradientDelay="$DefaultGradientDelaysForCRTTrajectory"
+if [[ $GradientDelay_flag -eq 1 ]]; then
+	if [[ $GradientDelay == "" || $GradientDelay == "Default" || $GradientDelay == "default" ]]; then
+		if [ ! -z "$DefaultGradientDelaysForCRTTrajectory" ]; then 
+			export  GradientDelay_flag=1
+			export  GradientDelay="$DefaultGradientDelaysForCRTTrajectory"
+		fi
 	fi
 fi
 
@@ -423,7 +425,7 @@ echo -e "\n\n5. CREATE MASK\n\n"
 # Lots of stuff happens here with many mnc2nii and nii2mnc calls.
 
 
-#read -p "Stop before creating B0Map."
+# read -p "Stop before creating B0Map."
 ## 6.
 ############# CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA ############
 if [[ $AlignFreq_flag -eq 1 ]] && ! [[ ${AlignFreq_path} == "" ]]; then
@@ -482,12 +484,11 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
 	else
 		rm -fR $out_path/TempServerDir
 		cp -R $tmp_dir/ $out_path/TempServerDir; RunFileOnServer=$out_path/TempServerDir/RunLCModel.sh; cp $curdir/RunLCModel.sh $RunFileOnServer
-		if [[ $RunLCModelAs == "" ]]; then																									 # Run LCModel on different computer,
-			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					 # connecting via ssh. You need 
-		else		
-																																	 # a key so that you can
-			ssh -o PasswordAuthentication=no -l $RunLCModelAs $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir" # automatically connect to this computer,
-		fi																																	 # without needing to type in the password!
+		if [[ $RunLCModelAs == "" ]]; then 														# Run LCModel on different computer,
+			ssh -o PasswordAuthentication=no $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir"					# connecting via ssh. You need 
+else																			 	# a key so that you can
+			ssh -o PasswordAuthentication=no -l $RunLCModelAs $RunLCModelOn "$RunFileOnServer $RunLCModelOn $out_path/TempServerDir" 		# automatically connect to this computer,
+		fi																	# without needing to type in the password!
 		sleep 40
 		rm -fR $out_path/TempServerDir
 	fi
@@ -510,6 +511,10 @@ BaseNameMatlabFunctions=$(basename $MatlabFunctionsFolder)
 cd ..
 tar cf $out_path/UsedSourcecode_Part1.tar $ScriptName --transform='s,^,/UsedSourcecode/,' --exclude='*/tmp*'
 
+# Copy the logfile
+cp $logfile $out_path/UsedSourcecode/logfile.log
+cp $logfile $out_path/logfile_part1.log
+
 # Archive the logfile
 cd $tmp_dir
 tar f $out_path/UsedSourcecode_Part1.tar -r $curlogname
@@ -526,6 +531,8 @@ gzip $out_path/UsedSourcecode_Part1.tar
 # Go back to the original folder
 cd $curdir
 
+# Copy measurement information to out_path (see read_csi_dat_new_v2.m)
+cp $tmp_dir/*.txt $out_path
 
 #10.
 ############ REMOVE UNECESSARY DATA ############
