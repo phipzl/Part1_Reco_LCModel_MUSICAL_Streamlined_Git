@@ -143,13 +143,23 @@ if [[ $mask_flag -eq 1 ]]; then
 				BetOptions="-f 0.7 -g 0"			# Default Bet opotion otherwise
 			fi
 		fi
-		mnc2nii -quiet ${tmp_dir}/magnitude.mnc ${tmp_dir}/nii_magnitude.nii 					# If brain was inputted, use BET2
-		if [[ $T1w_flag -eq 1 ]]; then
-			${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/brain $BetOptions -n -m     #-f 0.5 -g 0 -n -m
-			${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/lipid $BetOptions -n -A
+
+		#mnc2nii -quiet ${tmp_dir}/magnitude.mnc ${tmp_dir}/nii_magnitude.nii 					# If brain was inputted, use BET2
+		mnc2nii -quiet ${tmp_dir}/magnitude_AntiNoise.mnc ${tmp_dir}/nii_magnitude.nii
+		# read -p "Before Mask"
+		echo "Running BET now. This will take some time. $(date)"
+
+		if [[ $T1w_AntiNoise_flag -eq 1 ]]; then
+			${betp} ${tmp_dir}/magnitude_inversion_2.nii ${tmp_dir}/brain $BetOptions -f 0.1 -g 0.0 -n -m  #-B 
+			${betp} ${tmp_dir}/magnitude_inversion_2.nii ${tmp_dir}/lipid $BetOptions -n -A
+		elif [[ $T1w_flag -eq 1 ]]; then
+			echo "${betp} ${tmp_dir}/nii_magnitude.nii ${tmp_dir}/brain -B $BetOptions -n -m &"
+			${betp} ${tmp_dir}/nii_magnitude.nii ${tmp_dir}/brain -B $BetOptions -n -m &     #-f 0.5 -g 0 -n -m
+			echo "${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/lipid $BetOptions -n -A &"
+			${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/lipid $BetOptions -n -A &
 		else
-			${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/brain $BetOptions -n -m      #-f 0.5 -g 0 -n -m ##################### -Z # Improve results if FoV is very small in z-direction
-		fi
+			${betp} ${tmp_dir}/nii_magnitude ${tmp_dir}/brain $BetOptions -n -m	# -f 0.5 -g 0 -n -m 
+		fi										# -Z # Improve results if FoV is very small in z-direction
 		
 		gunzip ${tmp_dir}/brain_mask.nii.gz		
 		gunzip ${tmp_dir}/lipid_skull_mask.nii.gz
