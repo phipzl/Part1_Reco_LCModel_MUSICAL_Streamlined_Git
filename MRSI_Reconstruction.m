@@ -3,7 +3,7 @@
 %%%%%%%%%%%%%%                           PROGRAM TO HELL AND BACK                         %%%%%%%%%%%%%%
 %%%%%%%%%%%%%% ENTSTANDEN DURCH DIE KUNST DES PROGRAMMIERENS DURCH KONSEQUENTES ANSTARREN %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-clearvars -except tmp_dir
+function MRSI_Reconstruction(tmp_dir, CurAvg)
 
 
 if(~exist('CurAvg','var'))		% For those cases someone wants to run this script manually
@@ -1509,4 +1509,4 @@ if(~IsWatRef)		% No need to save water reference
 end
 
 
-
+end

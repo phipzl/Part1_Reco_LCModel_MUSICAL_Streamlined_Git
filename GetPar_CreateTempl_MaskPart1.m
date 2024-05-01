@@ -1,9 +1,7 @@
+function GetPar_CreateTempl_MaskPart1(tmp_dir)
 %% 0. Preparations
 
-clear functions; close all;
-clearvars -except tmp_dir
-
-run([tmp_dir '/InitialParameters.m'])
+eval(fileread([tmp_dir '/InitialParameters.m']));
 
 
 
@@ -67,7 +65,7 @@ ErrorFile = fopen([tmp_dir '/ErrorFile.sh'],'w+');
 
 % 2.2 LCModel_Control file
 if(isfield(Par.Paths,'LCM_ControlPath'))
-    run(Par.Paths.LCM_ControlPath);
+	eval(fileread(Par.Paths.LCM_ControlPath));
     Par.LCMControl = ControlWrite;
 end
 
@@ -76,7 +74,7 @@ clearvars -except tmp_dir Par ErrorFile
 
 % Write LCM Control file for water dataset
 if(isfield(Par.Paths,'LCM_Control_Water_path'))
-    run(Par.Paths.LCM_Control_Water_path);
+    eval(fileread(Par.Paths.LCM_Control_Water_path));
     Par.LCMControl_Water = ControlWrite;
 end
 
@@ -214,7 +212,7 @@ fields_files = fields(Par.Paths);
 TestOnServer = {''};
 ServerSSH = '';
 if(isfield(Par,'ServerInfo') && ~strcmp(Par.ServerInfo,CurComp))
-	TestOnServer = {'LCM_Path','basis_path','out_path'};
+	TestOnServer = {'basis_path','out_path'};
 	ServerSSH = [Par.ServerInfo.RunLCModelAs '@' Par.ServerInfo.RunLCModelOn]; ServerSSH(ServerSSH(1) == '@') = []; % Delete @ symbol if it is on first place
 end
 TestLocal = setdiff(fields_files,TestOnServer(1:end-1));
@@ -284,7 +282,7 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 		csiPars.nPhasEnc = csiPars.nPhasEnc_FinalMatrix;    
 		if(csiPars.ThreeD_flag)
 			csiPars.nPartEnc = csiPars.nSLC_FinalMatrix;    % Only in ThreeD Case we have to change that.
-		end
+        end
     end
     
     
@@ -348,9 +346,9 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 		csiPars.StepSlice_zf = csiPars.StepSlice / zff; % TODO  this should be implemented later, when zerofilling is done in z direction - csiPars.StepSlice_zf = csiPars.StepSlice / 2;
 	else
 		csiPars.StepSlice_zf = csiPars.StepSlice;
-	end
+    end
 
-
+    
 	% Rename Position Fields
 	[csiPars.POS_X] = csiPars.Pos_Sag;
 	[csiPars.POS_Y] = csiPars.Pos_Cor;
@@ -378,14 +376,14 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 
 	% Create rotation matrix
 	RotMat = cat(1,csiPars.ReadNormalVector,csiPars.PhaseNormalVector,csiPars.SliceNormalVector);
-
+    
 	% Reverse x- and y- coordinates due to the reversed coordinate system of minc with respect to DICOM
 	Pos = [-csiPars.POS_X(1),-csiPars.POS_Y(1),csiPars.POS_Z(1)];
 
 	% Convert position from DICOM world coordinates to MINC start values 
 	% This approach is probably prone to extreme rotation of FOV and is not
 	% universal, however for the tested datasets it yielded correct results
-	Pos_Minc = RotMat * transpose(Pos); 
+Pos_Minc = RotMat * transpose(Pos); 
 	% The following line is old, and I think wrong. What I think happened is: Michal fixed the shift
 	% in the z-direction by half a voxel with the line below (effectively this line calculates
 	% Pos_z - FoV_z/2 + FoV_z/(2*N_z). Then I figured out that the x- and y-positions have to be
@@ -433,6 +431,29 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
 
 	end
 	
+	if(Par.Flags.basis_echo_flag == 1) %for spin echo with smaller matrix
+		% Original CSI Sizes w/o Interpolation
+		csiPars.nFreqEnc_ECHO = csiPars.nFreqEnc /2;
+		csiPars.nPhasEnc_ECHO = csiPars.nPhasEnc /2;
+		csiPars.nPartEnc_ECHO = csiPars.nPartEnc;
+		csiPars.nSLC_ECHO = csiPars.nSLC;
+		
+		csiPars.StepRead_ECHO = -csiPars.FoV_Read(1) / csiPars.nFreqEnc_ECHO ;
+		csiPars.StepPhase_ECHO = -csiPars.FoV_Phase(1) / csiPars.nPhasEnc_ECHO ;    
+		csiPars.StepSlice_ECHO = csiPars.FoV_Partition(1) / (csiPars.nPartEnc_ECHO * csiPars.nSLC_ECHO); 
+		
+		FoVHalf_ECHO = FoVHalf; FoVHalf_ECHO(3) = -csiPars.FoV_Partition(1)/csiPars.nPartEnc_ECHO*(csiPars.nPartEnc_ECHO-1)/2;
+		Pos_Minc_ECHO = Pos_Minc - FoVHalf + FoVHalf_ECHO;
+		
+		csiPars.POS_X_FirstVoxel_ECHO = Pos_Minc_ECHO(1) + csiPars.StepRead_ECHO/2;
+		csiPars.POS_Y_FirstVoxel_ECHO = Pos_Minc_ECHO(2) + csiPars.StepPhase_ECHO/2;
+		csiPars.POS_Z_FirstVoxel_ECHO = Pos_Minc_ECHO(3);	
+		
+		%if(csiPars.ThreeD_flag)
+		%	csiPars.POS_Z_FirstVoxel_ECHO = csiPars.POS_Z_FirstVoxel_ECHO + csiPars.StepSlice_ECHO/2;     
+		%end
+
+	end
 	
 
 	% Read Patientname
@@ -754,7 +775,7 @@ end
 %% 7. Create Minc Template
 
 fprintf('\n\nCreate Minc Templates\n');
-run ./Create_MincTemplates.m
+Create_MincTemplates(tmp_dir, Par)
 
 
 
@@ -766,20 +787,20 @@ run ./Create_MincTemplates.m
 
 
 
-if(Par.Flags.mask_flag)
-    
-    if(~isempty(regexpi(Par.Settings.mask_method, 'voi')) || Par.CSI.ThreeD_flag)
-        fprintf('\n\nCreate VoI Mask\n');    
-        run ./create_mask_VOI.m
-    end
-        
-    
-else        % PROCESS WHOLE FoV
-    
-    magnitude_mask = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
-    magnitude_fid = fopen([tmp_dir '/mask_brain.raw'],'w');
-    fwrite(magnitude_fid,magnitude_mask,'float');
-    fclose(magnitude_fid);
+	if(Par.Flags.mask_flag)
+		
+		if(~isempty(regexpi(Par.Settings.mask_method, 'voi')) || Par.CSI.ThreeD_flag ||~isempty(regexpi(Par.Settings.mask_method, 'dreid')))
+			fprintf('\n\nCreate VoI Mask\n');    
+			create_mask_VOI(tmp_dir)
+		end
+			
+		
+	else        % PROCESS WHOLE FoV
+		
+		magnitude_mask = ones([Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC]);
+		magnitude_fid = fopen([tmp_dir '/mask_brain.raw'],'w');
+		fwrite(magnitude_fid,magnitude_mask,'float');
+		fclose(magnitude_fid);
     
     if(Par.CSI.ThreeD_flag)
         ZFSize = [Par.CSI.nFreqEnc Par.CSI.nPhasEnc Par.CSI.nPartEnc*Par.CSI.nSLC] * Par.Settings.ZeroFillMetMaps;
@@ -792,25 +813,25 @@ else        % PROCESS WHOLE FoV
     magnitude_fid = fopen([tmp_dir '/mask_brain_zf.raw'],'w');
     fwrite(magnitude_fid,magnitude_mask,'float');
     fclose(magnitude_fid);
-	
-	if(Par.Flags.InterpolateCSIResolution_flag == 1)
-		magnitude_mask_BefInterpol = ones([Par.CSI.nFreqEnc_BefInterpol Par.CSI.nPhasEnc_BefInterpol Par.CSI.nPartEnc_BefInterpol*Par.CSI.nSLC_BefInterpol]);
-		magnitude_fid_BefInterpol = fopen([tmp_dir '/mask_brain_BefInterpol.raw'],'w');
-		fwrite(magnitude_fid_BefInterpol,magnitude_mask_BefInterpol,'float');
-		fclose(magnitude_fid_BefInterpol);
+		
+		if(Par.Flags.InterpolateCSIResolution_flag == 1)
+			magnitude_mask_BefInterpol = ones([Par.CSI.nFreqEnc_BefInterpol Par.CSI.nPhasEnc_BefInterpol Par.CSI.nPartEnc_BefInterpol*Par.CSI.nSLC_BefInterpol]);
+			magnitude_fid_BefInterpol = fopen([tmp_dir '/mask_brain_BefInterpol.raw'],'w');
+			fwrite(magnitude_fid_BefInterpol,magnitude_mask_BefInterpol,'float');
+			fclose(magnitude_fid_BefInterpol);
+		end
+		
 	end
-     
-end
-    
+		
 
-if (~Par.Flags.T1w_flag)
-    fprintf('\n\nCreate Magnitude of Image, Image_VC or CSI for Masking.\n');            
-    run ./create_magnitude.m
-end
-
+	if (~Par.Flags.T1w_flag)
+		fprintf('\n\nCreate Magnitude of Image, Image_VC or CSI for Masking.\n');            
+		create_magnitude(tmp_dir)
+	end
 
 
 
 fprintf(ErrorFile,'ErrorInGetPar_CreateTempl=0; ErrorMessage=''''');
 fclose(ErrorFile);		   
 
+end

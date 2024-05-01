@@ -1,3 +1,4 @@
+#!/bin/bash
 #####################################################
 #### WRITE INFO TO PARAMETER FILE FOR MATLAB USE ####
 #####################################################
@@ -33,6 +34,10 @@ echo "dont_compute_LCM_flag = ${dont_compute_LCM_flag};" >> $Par
 echo "LCM_ControlPath_flag = ${LCM_ControlPath_flag};" >> $Par
 echo "LCM_ControlPath_Water_flag = ${LCM_ControlPath_Water_flag};" >> $Par
 echo "phase_encoding_direction_is_RL_flag = ${phase_encoding_direction_is_RL_flag};" >> $Par
+echo "basis_echo_flag = ${basis_echo_flag};" >> $Par
+echo "control_echo_flag = ${control_echo_flag};" >> $Par
+echo "XPACE_motion_correction_flag = ${XPACE_motion_correction_flag};" >> $Par
+echo "old_dat_file_flag = ${old_dat_file_flag};" >> $Par
 #BOW - for phase & frequency prior knowledge
 echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par
@@ -43,7 +48,7 @@ echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
 # Mandatory Input files, Output directory
 Loop_index=0
 for csi_path_dummy in ${csi_path}; do
-	let Loop_index=${Loop_index}+1
+	((Loop_index = loop_index + 1))
 	echo "csi_path{${Loop_index}} = '${csi_path_dummy}';" >> $Par
 done
 
@@ -55,7 +60,7 @@ fi
 
 Loop_index=0
 for basis_path_dummy in ${basis_path}; do
-	let Loop_index=${Loop_index}+1
+	((Loop_index = loop_index + 1))
 	echo "basis_path{${Loop_index}} = '${basis_path_dummy}';" >> $Par
 done
 echo "out_path = '${out_path}';" >> $Par
@@ -64,19 +69,19 @@ echo "out_path = '${out_path}';" >> $Par
 # Optional Input files
 Loop_index=0
 for image_normal_path_dummy in ${image_normal_path}; do
-	let Loop_index=${Loop_index}+1
+	((Loop_index = loop_index + 1))
 	echo "image_normal_path{${Loop_index}} = '${image_normal_path_dummy}';" >> $Par
 done
 
 Loop_index=0
 for image_flip_path_dummy in ${image_flip_path}; do
-	let Loop_index=${Loop_index}+1
+	((Loop_index = loop_index + 1))
 	echo "image_flip_path{${Loop_index}} = '${image_flip_path_dummy}';" >> $Par
 done
 
 Loop_index=0
 for image_VC_path_dummy in ${image_VC_path}; do
-	let Loop_index=${Loop_index}+1
+	((Loop_index = loop_index + 1))
 	echo "image_VC_path{${Loop_index}} = '${image_VC_path_dummy}';" >> $Par
 done
 
@@ -92,7 +97,7 @@ if [[ $AlignFreq_flag -eq 1 && -n $AlignFreq_MethodAndPath ]]; then				# -n test
 	fi
 	echo "AlignFreq_method = '${AlignFreq_method}';" >> $Par
 	for AlignFreq_path_dummy in ${AlignFreq_path}; do
-		let Loop_index=${Loop_index}+1
+		((Loop_index = loop_index + 1))
 		echo "AlignFreq_path{${Loop_index}} = '${AlignFreq_path_dummy}';" >> $Par
 	done
 fi
@@ -154,7 +159,7 @@ fi
 Loop_index=0
 if [[ $NonCartTraj_flag -eq 1 ]]; then
 	for dummy in ${NonCartTrajFile_path}; do
-		let Loop_index=${Loop_index}+1
+		((Loop_index = loop_index + 1))
 		echo "NonCartTrajFile_path{${Loop_index}} = '${dummy}';" >> $Par
 	done
 fi
@@ -167,6 +172,16 @@ else
 	echo "GradientDelay = 0;" >> $Par
 fi
 
+if [[ $basis_echo_flag -eq 1 ]]; then
+	echo "basis_echo_path = '${basis_echo_path}';" >> $Par
+fi
+if [[ $control_echo_flag -eq 1 ]]; then
+	echo "control_echo_path = '${control_echo_path}';" >> $Par
+fi
+
+if [[ $XPACE_motion_correction_flag -eq 1 ]]; then
+	echo "XPACE_motion_correction_path = '${XPACE_motion_correction_path}';" >> $Par
+fi
 
 #Gh added 2019
 if [[ $FirstOrderPhaseModulation_flag -eq 1 ]]; then
@@ -181,4 +196,3 @@ fi
 if ! [[ ${RunLCModel_CPUCores} = "" ]]; then
 	echo "RunLCModel_CPUCores = ${RunLCModel_CPUCores};" >> $Par
 fi
-

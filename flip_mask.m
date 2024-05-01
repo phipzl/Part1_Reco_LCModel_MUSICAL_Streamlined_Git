@@ -6,9 +6,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
+function flip_mask(tmp_dir)
 %% 0. DEFINITIONS, PREPARATIONS
 
-clearvars -except tmp_dir; close all;
 load([tmp_dir '/Parameters.mat'])
 
 
@@ -45,8 +45,7 @@ end
     mask_fid = fopen(Files{ii},'w+');
     fwrite(mask_fid,CurMask,'float');
     fclose(mask_fid);
-    clear CurMask
 
 end
 
-
+end

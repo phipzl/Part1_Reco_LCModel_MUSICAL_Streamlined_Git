@@ -39,14 +39,14 @@ mv ${tmp_dir}/mnc/*/* ${tmp_dir}/B1map_orig.mnc
 
 
 # echo -e "\nmincstats..."
-# /opt/minc/bin/mincstats ${tmp_dir}/csi_template.mnc
-# /opt/minc/bin/mincstats ${tmp_dir}/B1map_orig.mnc 
+# mincstats ${tmp_dir}/csi_template.mnc
+# mincstats ${tmp_dir}/B1map_orig.mnc 
 
 # echo -e "\nmnc2raw..."
-# /opt/minc/bin/minctoraw ${tmp_dir}/B1map_orig.mnc -nonormalize -float > ${tmp_dir}/B1map.raw 
+# minctoraw ${tmp_dir}/B1map_orig.mnc -nonormalize -float > ${tmp_dir}/B1map.raw 
 
 # echo -e "\nraw2mnc..."
-# /opt/minc/bin/rawtominc -float -clobber -like ${tmp_dir}/csi_template.mnc -input ${tmp_dir}/B1map.raw ${tmp_dir}/B1map_orig.mnc
+# rawtominc -float -clobber -like ${tmp_dir}/csi_template.mnc -input ${tmp_dir}/B1map.raw ${tmp_dir}/B1map_orig.mnc
 
 echo -e "\nmincresample..."
 mincresample -clobber -nearest_neighbour -like ${tmp_dir}/csi_template.mnc ${tmp_dir}/B1map_orig.mnc ${tmp_dir}/B1map.mnc 

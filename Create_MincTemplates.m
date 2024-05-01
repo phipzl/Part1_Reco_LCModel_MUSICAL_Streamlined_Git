@@ -8,7 +8,7 @@
 %% 0. DEFINITIONS, PREPARATIONS
 
 
-
+function Create_MincTemplates(tmp_dir, Par)
 
 %% 1. Create an image of a duerer image
 
@@ -57,6 +57,29 @@ if(~Par.Flags.T1w_flag && isfield(Par,'Image'))
     image_template_fid = fopen([tmp_dir '/image_template.raw'],'w');
 	fwrite(image_template_fid,duerer_image,'float');       
     fclose(image_template_fid);
+end
+
+
+
+%% ECHO
+
+if(Par.Flags.basis_echo_flag == 1)
+    duerer_ECHO = imresize(duerer_orig,[Par.CSI.nFreqEnc_ECHO,Par.CSI.nPhasEnc_ECHO], 'bicubic');
+    duerer_ECHO = repmat(duerer_ECHO, [1 1 Par.CSI.nPartEnc_ECHO*Par.CSI.nSLC_ECHO]);
+    Orig_template_ECHO = fopen([tmp_dir '/csi_template_ECHO.raw'],'w');
+	fwrite(Orig_template_ECHO,duerer_ECHO,'float');       
+    fclose(Orig_template_ECHO);
+	
+	bashstring_ECHO = ['rawtominc -clobber -float ' tmp_dir '/csi_template_ECHO.mnc -input ' tmp_dir '/csi_template_ECHO.raw'];
+	bashstring_ECHO = sprintf('%s -xstep %8.6f -ystep %8.6f -zstep %8.6f',bashstring_ECHO,Par.CSI.StepRead_ECHO, Par.CSI.StepPhase_ECHO, Par.CSI.StepSlice_ECHO);
+	bashstring_ECHO = sprintf('%s -xstart %8.6f -ystart %8.6f -zstart %8.6f',bashstring_ECHO, min(Par.CSI.POS_X_FirstVoxel_ECHO), ...
+						min(Par.CSI.POS_Y_FirstVoxel_ECHO), min(Par.CSI.POS_Z_FirstVoxel_ECHO));
+	bashstring_ECHO = sprintf('%s',bashstring_ECHO);
+	bashstring_ECHO = sprintf('%s -xdircos %8.6f %8.6f %8.6f -ydircos %8.6f %8.6f %8.6f -zdircos %8.6f %8.6f %8.6f', bashstring_ECHO, Par.CSI.ReadNormalVector, ...
+	Par.CSI.PhaseNormalVector, Par.CSI.SliceNormalVector );            
+	bashstring_ECHO = sprintf('%s %d %d %d',bashstring_ECHO,Par.CSI.nPartEnc_ECHO*Par.CSI.nSLC_ECHO,Par.CSI.nFreqEnc_ECHO,Par.CSI.nPhasEnc_ECHO);	
+else
+	bashstring_ECHO = '';
 end
 
 
@@ -174,12 +197,4 @@ fprintf(fiddy, '%s\n%s\n%s\n%s\n%s\n%s', bashstring, bashstring_zf,bashstring_Be
 fclose(fiddy);
 fileattrib([tmp_dir '/CreateMincTemplates.sh'],'+x','gu');   % Executable for group and user.
 
-
-% Why can't I run the commands from here in MATLAB ???????
-% [bla,bla2] =  unix(bashstring);
-% unix(bashstring_zf);
-%
-% Or at least running the .sh file
-% ! bash ' tmp_dir '/CreateMincTemplates.sh
-
-
+end
