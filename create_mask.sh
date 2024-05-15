@@ -57,8 +57,7 @@ if [[ $T1w_flag -eq 1 ]]; then				   											# if T1_map is inputted, create 
 			mincmath -clobber -segment -const2 $lower_threshold $max_magnitude ${tmp_dir}/magnitude_AntiNoise.mnc ${tmp_dir}/mask_AntiNoise.mnc
 			mincmath -clobber -mult ${tmp_dir}/magnitude.mnc ${tmp_dir}/mask_AntiNoise.mnc ${tmp_dir}/magnitude2.mnc
 
-			##GH: added for new masking
-			# mnc2nii -quiet ${tmp_dir}/magnitude_AntiNoise.mnc ${tmp_dir}/magnitude_inversion_2.nii
+			mnc2nii -quiet ${tmp_dir}/magnitude_AntiNoise.mnc ${tmp_dir}/magnitude_inversion_2.nii	# for BET masking based on INV2
 
 			rm ${tmp_dir}/magnitude.mnc
 			mv ${tmp_dir}/magnitude2.mnc ${tmp_dir}/magnitude.mnc
