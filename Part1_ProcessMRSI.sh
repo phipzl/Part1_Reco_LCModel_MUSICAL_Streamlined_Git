@@ -541,8 +541,10 @@ cd ..
 tar cf "$out_path/UsedSourcecode_Part1.tar" "$ScriptName" --transform='s,^,/UsedSourcecode/,' --exclude='*/tmp*'
 
 # Copy the logfile
-cp "$logfile" "$out_path/UsedSourcecode/logfile.log"
 cp "$logfile" "$out_path/logfile_part1.log"
+
+# Copy MeasurementInfos
+cp "$tmp_dir/MeasurementInfos.txt" "$out_path"
 
 # Archive the logfile
 cd "$tmp_dir" || exit

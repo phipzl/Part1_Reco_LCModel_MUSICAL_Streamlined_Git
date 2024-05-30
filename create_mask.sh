@@ -119,7 +119,7 @@ if [[ $mask_flag -eq 1 ]]; then
 			${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/brain -f 0.7 -g 0 -n -m      #-f 0.5 -g 0 -n -m ##################### -Z # Improve results if FoV is very small in z-direction
 		fi
 		gunzip ./${tmp_dir}/brain_mask.nii.gz
-		rm ./${tmp_dir}/mask_brain_unres.mnc
+		rm -f ./${tmp_dir}/mask_brain_unres.mnc
 		nii2mnc -quiet ./${tmp_dir}/brain_mask.nii ./${tmp_dir}/mask_brain_unres.mnc
 		rm ./${tmp_dir}/*.nii
 
@@ -134,11 +134,11 @@ if [[ $mask_flag -eq 1 ]]; then
 		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BET.mnc
 		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
 			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc
+			mincmath -clobber -mult ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
 		fi
 
 		# create common mask
-		mincmath -clobber -mult ./${tmp_dir}/mask_brain_BET.mnc ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc
-		mincmath -clobber -mult ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
+		mincmath -clobber -mult ./${tmp_dir}/mask_brain_BET.mnc ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc		
 
 		# For some reason the mask is flipped (because of the nii-stuff?). Undo this flip
 		if [[ $T1w_flag -eq 0 ]]; then
@@ -333,7 +333,7 @@ if [[ $mask_flag -eq 1 ]]; then
 	#########################################
 	########   V  o  I (Once again)  ########
 	#########################################
-	if [[ -f "./${tmp_dir}/mask_brain_VOI.mnc" ]]; then
+	if [[ $voi_found -gt 0 && -f "./${tmp_dir}/mask_brain_VOI.mnc" ]]; then
 
 		if [[ -f "./${tmp_dir}/mask_brain.mnc" ]]; then		
 			mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_brain2.mnc
