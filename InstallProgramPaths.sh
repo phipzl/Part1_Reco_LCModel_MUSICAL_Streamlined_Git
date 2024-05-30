@@ -42,5 +42,7 @@ export RunLCModelOn="nc1"   # Run LCModel on different computer, connecting via 
                             # BE AWARE THAT THIS COMPUTER HAS TO BE ABLE TO ACCESS THE "LCM_Path", THE BASIS-FILE AND THE "out_path"!
 export RunLCModelAs=""  # If you need to be a specific user on the LCModel computer. Leave empty (or dont declare it at all) if not necessary.
 
-export rawtomincp="/opt/minc/1.9.17/bin/rawtominc"
+# MATLAB Runtime (runs compiled MATLAB code without license)
+LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/MATLAB_Runtime_R2021b/v911/runtime/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/bin/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/os/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/opengl/lib/glnxa64
+export MatlabCompiledFunctions="Matlab_Compiled"
 

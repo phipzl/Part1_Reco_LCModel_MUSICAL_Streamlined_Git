@@ -172,6 +172,7 @@ export julia_reconstruction=0
 export old_dat_file_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
+export compiled_matlab_flag=0
 #BOW
 export priors_flag=0
 export DebugAdditionalInput_flag=0
@@ -184,7 +185,7 @@ LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKlu?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -339,6 +340,9 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     F)
         export FirstOrderPhaseCorr_flag=1
         ;;
+	K)
+		export compiled_matlab_flag=1
+		;;
     l)
         export dont_compute_LCM_flag=1
         ;;
@@ -483,13 +487,13 @@ echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
 if [[ $WaterReference_flag -eq 1 ]]; then
     echo -e "\nProcess water reference data for water scaling."
     echo -e "\n\nRunning:\n"
-    run_matlab MRSI_Reconstruction 1
+    run_mrsi_reconstruction 1
 fi
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, second run\n\n"
 date
 # If we pass over several IMA or dat files, average them
 for ((CurAvg = 1; CurAvg <= NumberOfCSIFiles; CurAvg = CurAvg + 1)); do
-    run_matlab MRSI_Reconstruction $CurAvg
+    run_mrsi_reconstruction $CurAvg
 done
 
 # read -rp "Stop before LCModel fitting"
