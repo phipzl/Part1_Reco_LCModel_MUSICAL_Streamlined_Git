@@ -169,7 +169,6 @@ export control_echo_flag=0
 export basis_echo_flag=0
 export XPACE_motion_correction_flag=0
 export julia_reconstruction=0
-export old_dat_file_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
 export compiled_matlab_flag=0
@@ -334,9 +333,6 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         ;;
 
     # Flags
-    d)
-        export old_dat_file_flag=1
-        ;;
     F)
         export FirstOrderPhaseCorr_flag=1
         ;;
@@ -394,7 +390,6 @@ optional:
 -X  [XPACE MOTION LOG]      XPACE MOTION LOG
 
 Flags:
--d  Use the deprecated, old dat file format (before sequence merging, 06/2023)
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
@@ -538,7 +533,7 @@ BaseNameMatlabFunctions=$(basename "$MatlabFunctionsFolder")
 
 # Archive this script itself
 cd ..
-tar cf "$out_path/UsedSourcecode_Part1.tar" "$ScriptName" --transform='s,^,/UsedSourcecode/,' --exclude='*/tmp*'
+tar --exclude='*/tmp*' --transform='s,^,/UsedSourcecode/,' -cf "$out_path/UsedSourcecode_Part1.tar" "$ScriptName"
 
 # Copy the logfile
 cp "$logfile" "$out_path/logfile_part1.log"

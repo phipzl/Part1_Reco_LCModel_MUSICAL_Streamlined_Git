@@ -21,7 +21,7 @@ run_mrsi_reconstruction() {
         "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1"
     else
         # run the matlab script $1
-        echo -e "\nRun this command: $matlabp -nodisplay -batch \"addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', '$1')\""
-        $matlabp -nodisplay -batch "addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', '$1')"
+        echo -e "\nRun this command: $matlabp -nodisplay -batch \"addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
+        $matlabp -nodisplay -batch "addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1)"
     fi
 }

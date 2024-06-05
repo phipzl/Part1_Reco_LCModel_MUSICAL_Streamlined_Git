@@ -37,7 +37,6 @@ echo "phase_encoding_direction_is_RL_flag = ${phase_encoding_direction_is_RL_fla
 echo "basis_echo_flag = ${basis_echo_flag};" >> $Par
 echo "control_echo_flag = ${control_echo_flag};" >> $Par
 echo "XPACE_motion_correction_flag = ${XPACE_motion_correction_flag};" >> $Par
-echo "old_dat_file_flag = ${old_dat_file_flag};" >> $Par
 #BOW - for phase & frequency prior knowledge
 echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par

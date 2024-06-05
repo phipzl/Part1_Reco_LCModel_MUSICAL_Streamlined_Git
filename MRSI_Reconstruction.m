@@ -6,8 +6,12 @@
 function MRSI_Reconstruction(tmp_dir, CurAvg)
 
 
-if(~exist('CurAvg','var'))		% For those cases someone wants to run this script manually
+if nargin < 2 % For those cases someone wants to run this script manually
     CurAvg = 1;
+else
+    if ischar(CurAvg) % Convert to number when called via command line
+        CurAvg = str2double(CurAvg);
+    end
 end
 
 CoilCombtic = tic;
@@ -23,7 +27,7 @@ if (exist([tmp_dir '/Parameters_water.mat'],'file'))
 else
     load([tmp_dir '/Parameters.mat'])
 end
-if(~isfield(Par.ServerInfo,'RunLCModel_CPUCores'))
+if(~isfield(Par, 'ServerInfo') || ~isfield(Par.ServerInfo,'RunLCModel_CPUCores'))
 	Par.ServerInfo.RunLCModel_CPUCores = 8;
 end
 
