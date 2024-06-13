@@ -503,7 +503,7 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
     Search1=$(echo "$CurrentComputer" | grep -c "${RunLCModelOn}\.")
     Search2=$(echo "$RunLCModelOn" | grep -c "${CurrentComputer}\.")
     if [[ "$RunLCModelOn" == "" ]] || [[ $CurrentComputer == "$RunLCModelOn" ]] || [[ $Search1 -gt 0 ]] || [[ $Search2 -gt 0 ]]; then
-        ./RunLCModel.sh "$RunLCModelOn" "$tmp_dir" # Run LCModel locally
+        bash "${tmp_dir}/lcm_process_core_parallel.sh"
     else
         rm -fR "$out_path/TempServerDir"
         cp -R "$tmp_dir/" "$out_path/TempServerDir"
