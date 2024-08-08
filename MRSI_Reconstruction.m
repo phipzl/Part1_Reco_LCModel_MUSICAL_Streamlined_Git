@@ -572,7 +572,8 @@ if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'f
     %temp_x=load('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/MS_3DCRT_Berni_pipeline/test_wLukas/UnCombinedCSI.mat');
     %temp_x=permute(temp_x.csi,[2 3 4 5 1]);
     %csi=temp_x;
-    csi=csi*100; % It scales csi data similarly like with Lukas's pipeline --> it makes the L2 work with the same factor
+    Scalle = 1.1047e+09/norm(csi(:));
+    csi=csi*Scalle; % It scales csi data similarly like with Eva's old tested, working pipeline --> it makes the L2 work with the same factor
     fprintf('\n\nPerform Bilgic Lipid Decontamination: channelwise & sensitivity-weighted\n')
 
     mkdir([Par.Paths.out_path '/LipidDecontamination'])
@@ -701,7 +702,7 @@ if(Par.Flags.LipidDecon_flag == 1 && ~exist([tmp_dir '/Parameters_water.mat'],'f
             close(Lipid_fig_total)
     end    
 
-    csi_bak.Data = csi;
+    csi_bak.Data = single(csi)/Scalle;
     csi = csi_bak;
     clear csi_bak;
     
