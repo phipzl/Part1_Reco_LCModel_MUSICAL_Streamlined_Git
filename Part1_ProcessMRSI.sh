@@ -336,9 +336,9 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     F)
         export FirstOrderPhaseCorr_flag=1
         ;;
-	K)
-		export compiled_matlab_flag=1
-		;;
+    K)
+        export compiled_matlab_flag=1
+        ;;
     l)
         export dont_compute_LCM_flag=1
         ;;
@@ -391,6 +391,8 @@ optional:
 
 Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
+-K	Use compiled MATLAB functions.
+        No MATLAB license needed, but the functions must be compiled first (See compile.m)
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
