@@ -3,11 +3,15 @@
 %%%%%%%%%%%%%%                 CREATE a MASK TO PROCESS ONLY DATA INSIDE THE VOI              %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
+function create_mask_VOI(tmp_dir)
 %% 0. DEFINITIONS, PREPARATIONS
 
-%clearvars -except tmp_dir; clear functions; close all;
-%load([tmp_dir '/Parameters.mat'])
+if ~exist([tmp_dir '/Parameters.mat'],'file')
+	fprintf('Parameters.mat not found. Maybe this is water scan.\n');
+	return
+end
+
+load([tmp_dir '/Parameters.mat'])
 
 fn = transpose(fieldnames(Par.CSI));
 for fn_dummy = fn
@@ -78,3 +82,4 @@ magnitude_fid = fopen([tmp_dir '/mask_brain_VOI.raw'],'w');
 fwrite(magnitude_fid,magnitude_mask,'float');
 fclose(magnitude_fid);
 
+end

@@ -5,10 +5,9 @@
 %%%%%%%%%%%%%%                       READ IN MASK DATA AND FLIP IT                        %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
+function ExtractBrain_mask(tmp_dir)
 %% 0. DEFINITIONS, PREPARATIONS
 
-clearvars -except tmp_dir; close all;
 load([tmp_dir '/Parameters.mat'])
 
 
@@ -70,3 +69,4 @@ for ii = 1:numel(Sizes)
 
 end
 
+end

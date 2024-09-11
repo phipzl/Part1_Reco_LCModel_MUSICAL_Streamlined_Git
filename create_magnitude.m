@@ -8,7 +8,7 @@
 
 %% 0. DEFINITIONS, PREPARATIONS
 
-close all;
+function create_magnitude(tmp_dir)
 load([tmp_dir '/Parameters.mat'])
 
 % fn = transpose(fieldnames(Par.CSI));
@@ -37,7 +37,7 @@ if(Par.Flags.image_normal_flag)                                                 
     Sett.NonCartReco.Phaseroll_flag = false;
     magnitude = op_ReadAndRecoSiemensData(Par.Paths.image_normal_path,NonCartTrajFile_path,[],Sett);           % Read in data
     magnitude = magnitude.Data(:,:,:,1,:);
-    if(Par.Flags.image_flip_flag)                                                                             % Same for flip
+        if(Par.Flags.image_flip_flag)                                                                             % Same for flip
         magnitude_flip = op_ReadAndRecoSiemensData(Par.Paths.image_flip_path,NonCartTrajFile_path,[],Sett);
         magnitude_flip = magnitude_flip.Data(:,:,:,1,:);        
     end
@@ -46,7 +46,7 @@ if(Par.Flags.image_normal_flag)                                                 
         magnitude = ((magnitude + magnitude_flip)/2);
     end
     clear magnitude_flp
-
+    
 elseif(Par.Flags.image_VC_flag)                                                                                   % If ONLY VC-data was inutted for creating the mask
 	Sett.NonCartReco.CircularSFTFoV_flag = true; 
 	Sett.NonCartReco.Phaseroll_flag = false;
@@ -55,10 +55,13 @@ elseif(Par.Flags.image_VC_flag)                                                 
 else
 	Sett.NonCartReco.CircularSFTFoV_flag = true; 
     Sett.NonCartReco.Phaseroll_flag = false;
+    Sett.ReadIn.OmitDataSets = 'ONLINE';
     [MRSI,RefScan] = op_ReadAndRecoSiemensData(Par.Paths.csi_path,NonCartTrajFile_path,[],Sett);
-	if(~isempty(fieldnames(RefScan)))
+	if(isfield(RefScan,'Data'))
         magnitude = RefScan.Data(:,:,:,1,:,:,:);
     else
+        Sett.ReadIn.OmitDataSets = {};
+        [MRSI] = op_ReadAndRecoSiemensData(Par.Paths.csi_path,NonCartTrajFile_path,[],Sett);
         UseCSIForMagnitude_flag = true;
         magnitude = MRSI.Data(:,:,:,5,:,:,:);        
 	end
@@ -85,7 +88,7 @@ magnitude_fid = fopen([tmp_dir '/magnitude.raw'],'w');
 fwrite(magnitude_fid,magnitude,'float');
 fclose(magnitude_fid);
 
-
+end
 
 
 
