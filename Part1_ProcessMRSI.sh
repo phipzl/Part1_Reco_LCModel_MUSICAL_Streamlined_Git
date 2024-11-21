@@ -431,15 +431,15 @@ fi
 echo -e "\n\n2. Write Initial Parameters\n\n"
 . ./write_InitialParameters.sh
 
-# read -rp "Stop before Gathering info."
+
 # 3.
 ############ CREATE TEMPLATES FOR CREATING METABOLIC MAPS LATER ############
 echo -e "\n\n3. Gather Information, Create Minc Templates, Prepare Mask Creation.\n\n"
 # Run it twice for water referencing (it will automatically process the water ref file the first time, and the other the second time)
 if [[ $LCM_ControlPath_Water_flag -eq 1 ]]; then
-    run_matlab GetPar_CreateTempl_MaskPart1
+    run_matlab GetPar_CreateTempl_MaskPart1 0
 fi
-run_matlab GetPar_CreateTempl_MaskPart1
+run_matlab GetPar_CreateTempl_MaskPart1 0
 
 # Terminate if there was an error
 bash "$tmp_dir/ErrorFile.sh"
@@ -484,13 +484,13 @@ echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
 if [[ $WaterReference_flag -eq 1 ]]; then
     echo -e "\nProcess water reference data for water scaling."
     echo -e "\n\nRunning:\n"
-    run_mrsi_reconstruction 1
+    run_mrsi_reconstruction 1 0
 fi
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, second run\n\n"
 date
 # If we pass over several IMA or dat files, average them
 for ((CurAvg = 1; CurAvg <= NumberOfCSIFiles; CurAvg = CurAvg + 1)); do
-    run_mrsi_reconstruction $CurAvg
+    run_mrsi_reconstruction $CurAvg 0
 done
 
 # read -rp "Stop before LCModel fitting"

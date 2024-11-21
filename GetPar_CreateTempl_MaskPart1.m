@@ -211,9 +211,17 @@ fields_files = fields(Par.Paths);
 [bla,CurComp] = unix('hostname');
 TestOnServer = {''};
 ServerSSH = '';
+
+
 if(isfield(Par,'ServerInfo') && ~strcmp(Par.ServerInfo,CurComp))
-    TestOnServer = {'basis_path','out_path'};
+    TestOnServer = {'LCM_Path','basis_path','out_path'};
+    if(strcmpi(Par.Paths.LCM_Path,'lcmodel'))
+        TestOnServer(1) = [];
+    end
     ServerSSH = [Par.ServerInfo.RunLCModelAs '@' Par.ServerInfo.RunLCModelOn]; ServerSSH(ServerSSH(1) == '@') = []; % Delete @ symbol if it is on first place
+end
+if(strcmpi(Par.Paths.LCM_Path,'lcmodel'))
+    fields_files = setdiff(fields_files,'LCM_Path');
 end
 TestLocal = setdiff(fields_files,TestOnServer(1:end-1));
 
