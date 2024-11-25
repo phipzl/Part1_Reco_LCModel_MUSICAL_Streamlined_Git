@@ -124,8 +124,11 @@ if [[ $mask_flag -eq 1 ]]; then
             $rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_brain_unres.raw ./${tmp_dir}/mask_brain_unres.mnc
         fi
 
-        ## Resample to CSI
+        ## Resample to CSI, and solving header problems related to the number of digits in direction_cosines
         mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BET.mnc
+        minctoraw ./${tmp_dir}/mask_brain_BET.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BET.raw
+        $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain_BET.raw ./${tmp_dir}/mask_brain_BET.mnc
+
         if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
             mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc
             mincmath -clobber -mult ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
