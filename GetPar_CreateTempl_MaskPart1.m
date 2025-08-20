@@ -249,17 +249,25 @@ clear TestLocal bla out_dir_attr;
 %% If Folder with DICOMs is passed over, make list of DICOM files
 
 BakCSIPath = Par.Paths.csi_path;
+Par.Flags.DICOM_flag = false;
 if(numel(Par.Paths.csi_path) == 1)
     Existence = exist(Par.Paths.csi_path{1},'file');
     if(Existence == 7) % Return value is 7 for folder
         
-        csi_path_allfiles = dir( fullfile(Par.Paths.csi_path{1},'*.IMA') );
+
+        csi_path_allfiles = dir( fullfile(Par.Paths.csi_path{1},'*.*') );
+        csi_path_allfiles = natsortfiles(csi_path_allfiles);
         csi_path_allfiles = {csi_path_allfiles.name}';
+        DicomFoundVec = ~cellfun(@isempty,regexpi(csi_path_allfiles,'\.IMA|\.dcm'));
+        csi_path_allfiles = csi_path_allfiles(DicomFoundVec);
+
+%         csi_path_allfiles = dir( fullfile(Par.Paths.csi_path{1},'*.IMA') );
         csi_path_allfiles = strcat(Par.Paths.csi_path{1},'/',csi_path_allfiles);
         if(numel(csi_path_allfiles) > 0)
             Par.Paths.csi_path = csi_path_allfiles;
+            Par.Flags.DICOM_flag = true;
         else
-            fprintf('\nError in GetPar_CreateTempl_MaskPart1.m: Could not find any DICOM files in the folder you gave me. Abort.\n');
+            fprintf('\nError in GetPar_CreateTempl_MaskPart1.m: Could not find any DICOM files in the folder\n%s. Abort.\n',Par.Paths.csi_path);
             return;
         end
         
@@ -475,17 +483,10 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
     
     
     % At this point, a bunch of interesting data is loaded into MATLAB, including B0 [T], w0 [Hz], transmitter voltage, age, sex, weight, flip angle, which we save in the tmp_dir
-    fprintf('Saving MeasurementInfos.txt to tmp from %s\n', Par.Paths.csi_path{1});
-    mapVBVDObj = mapVBVD(Par.Paths.csi_path{1}, 'readheader');
-    PatientData=[mapVBVDObj.hdr.Dicom.tPatientName, ' ', ...
-        num2str(mapVBVDObj.hdr.Config.PatientBirthDay), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.flPatientAge), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.lPatientSex), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.flUsedPatientWeight), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.lFrequency), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.flMagneticFieldStrength), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.flTransRefAmpl), ' ', ...
-        num2str(mapVBVDObj.hdr.Dicom.adFlipAngleDegree)];
+
+    PatientData = ReadMeasurementInfoFromMRSI(Par);
+
+
     
     fid=fopen([Par.Settings.tmp_dir '/MeasurementInfos.txt'], 'w');
     fprintf(fid, 'Name DoB Age Sex Weight w_0 B_0 U_transmit alpha_E\n%s\n',PatientData);
@@ -858,4 +859,61 @@ end
 fprintf(ErrorFile,'ErrorInGetPar_CreateTempl=0; ErrorMessage=''''');
 fclose(ErrorFile);
 
+end
+
+function Info = ReadMeasurementInfoFromMRSI(Par)
+
+    fprintf('Saving MeasurementInfos.txt to tmp from %s\n', Par.Paths.csi_path{1});
+    if(Par.Flags.DICOM_flag)
+        fprintf('\nWarning: Input were DICOM files. Not all info can be read from DICOMs. Update the code in GetPar_CreateTempl_MaskPart1.m.')
+        
+        Test = dicominfo(Par.Paths.csi_path{1});
+
+%         FamName = Test.PatientName.FamilyName;
+%         if(isempty(FamName))
+%             FamName = 'xxxxx';
+%         end
+        if(isempty(Test.PatientBirthDate))
+            Test.PatientBirthDate = 'Unknown';
+        end        
+        if(isempty(Test.PatientAge))
+            Test.PatientAge = 'Unknown';
+        end 
+        if(isempty(Test.PatientAge))
+            Test.PatientAge = 'Unknown';
+        end 
+        if(isempty(Test.PatientSex))
+            Test.PatientSex = 'Unknown';
+        end 
+        if(isempty(Test.PatientWeight))
+            Test.PatientWeight = 'Unknown';
+        end         
+        if(isempty(Test.PatientSex))
+            Test.PatientSex = 'Unknown';
+        end 
+        if(isempty(Test.PatientSex))
+            Test.PatientSex = 'Unknown';
+        end 
+
+        Info=[Par.CSI.PatName, ' ', ...
+            num2str(Test.PatientBirthDate), ' ', ...
+            num2str(Test.PatientAge), ' ', ...
+            num2str(Test.PatientSex), ' ', ...
+            num2str(Test.PatientWeight), ' ', ...
+            'Unknown', ' ', ...
+            'Unknown', ' ', ...
+            'Unknown', ' ', ...
+            'Unknown'];    
+    else
+        mapVBVDObj = mapVBVD(Par.Paths.csi_path{1}, 'readheader');
+        Info=[mapVBVDObj.hdr.Dicom.tPatientName, ' ', ...
+            num2str(mapVBVDObj.hdr.Config.PatientBirthDay), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.flPatientAge), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.lPatientSex), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.flUsedPatientWeight), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.lFrequency), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.flMagneticFieldStrength), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.flTransRefAmpl), ' ', ...
+            num2str(mapVBVDObj.hdr.Dicom.adFlipAngleDegree)];
+    end
 end
