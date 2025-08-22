@@ -52,8 +52,8 @@ if [[ $T1w_flag -eq 1 ]]; then # if T1_map is inputted, create magnitude minc fi
             mincmath -clobber -segment -const2 $lower_threshold $max_magnitude ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/mask_AntiNoise.mnc
             mincmath -clobber -mult ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/mask_AntiNoise.mnc ./${tmp_dir}/magnitude2.mnc
 
-            ##GH: added for new masking
-            mnc2nii -quiet ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/magnitude_inversion_2.nii
+            ##GH: added for new masking. bstr: Not necessary anymore, I use magnitude_AntiNoise.mnc later for the mask creation if it exists
+            #mnc2nii -quiet ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/magnitude_inversion_2.nii
 
             rm ./${tmp_dir}/magnitude.mnc
             mv ./${tmp_dir}/magnitude2.mnc ./${tmp_dir}/magnitude.mnc
@@ -89,221 +89,170 @@ if [[ $mask_flag -eq 1 ]]; then
     # Create mask out of magnitude image, VoI-Info, threshold, or copy user-given mask.
     voi_found=$(echo $mask_method | grep -c -i "voi")
     bet_found=$(echo $mask_method | grep -c -i "bet")
-    ThreeD_found=$(echo $mask_method | grep -c -i "dreid")
     thresh_found=$(echo $mask_method | grep -c -i "thresh")
+    ThreeD_found=$(echo $mask_method | grep -c -i "dreid")
+	if [[ $ThreeD_found > 0 ]]; then
+		echo -e "\n\nWARNING: YOU ARE USING AN OUTDATED MASKING OPTION \"dreid\" WHICH NO LONGER EXISTS.\nSWITCHING TO \"bet\" INSTEAD."
+		mask_method="bet"
+		ThreeD_found=0; bet_found=1;
+	fi
 
-    #########################################
-    ########   ThreeD                ########
-    #########################################
-    if [[ $ThreeD_found > 0 ]]; then
 
-        #VOI pfusch
-        $rawtomincp -float -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain_VOI.raw ./${tmp_dir}/mask_brain_VOI.mnc # The VOI mask was created by the MATLAB script
+	#############################
+	########   V  o  I   ########
+	#############################
+	if [[ -f "./${tmp_dir}/mask_brain_VOI.raw" ]]; then
 
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            $rawtomincp -float -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brainZ_VOI_BefInterpol_VOI.raw ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc
-        fi
-        #end VOI pfusch
 
-        #BET pfusch
-        mnc2nii -quiet ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/nii_magnitude.nii # If brain was inputted, use BET2
+		$rawtomincp -float -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain_VOI.raw ./${tmp_dir}/mask_brain_VOI.mnc >/dev/null    # The VOI mask was created by the MATLAB script
 
-        if [[ $T1w_flag -eq 1 ]]; then
-            ${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/brain -f 0.13 -g 0 -n -m #-f 0.5 -g 0 -n -m
-        else
-            ${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/brain -f 0.7 -g 0 -n -m #-f 0.5 -g 0 -n -m ##################### -Z # Improve results if FoV is very small in z-direction
-        fi
-        gunzip ./${tmp_dir}/brain_mask.nii.gz
-        rm -f ./${tmp_dir}/mask_brain_unres.mnc
-        nii2mnc -quiet ./${tmp_dir}/brain_mask.nii ./${tmp_dir}/mask_brain_unres.mnc
-        rm ./${tmp_dir}/*.nii
+		mincresample -like ./${tmp_dir}/csi_template_zf.mnc -nearest_neighbour ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain_VOI_zf.mnc
 
-        #### Solving some problem with the dircos (???)
-        if [[ $T1w_flag -eq 0 ]]; then
-            minctoraw ./${tmp_dir}/mask_brain_unres.mnc -nonormalize -float >./${tmp_dir}/mask_brain_unres.raw
-            $rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_brain_unres.raw ./${tmp_dir}/mask_brain_unres.mnc
-        fi
+		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+		    $rawtomincp -float -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_VOI_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc >/dev/null
+		fi
+	fi
+	
+	
+	
+	#############################
+	########   B  E  T   ########
+	#############################
+	if [[ $bet_found > 0 ]]; then		# if mask is created with brain extraction tool
+		
+	# See if the user provided a -f and -g option for bet
+		BetOptionsFound=$(echo $mask_method | grep -ci "bet,\s*")
 
-        ## Resample to CSI, and solving header problems related to the number of digits in direction_cosines
-        mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BET.mnc
-        minctoraw ./${tmp_dir}/mask_brain_BET.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BET.raw
-        $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain_BET.raw ./${tmp_dir}/mask_brain_BET.mnc
-
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc
-            mincmath -clobber -mult ./${tmp_dir}/mask_brain_BefInterpol_BET.mnc ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
-        fi
-
-        # create common mask
-        mincmath -clobber -mult ./${tmp_dir}/mask_brain_BET.mnc ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc
-
-        # For some reason the mask is flipped (because of the nii-stuff?). Undo this flip
-        if [[ $T1w_flag -eq 0 ]]; then
-            minctoraw - clobber ./${tmp_dir}/mask_brain.mnc -nonormalize -float >./${tmp_dir}/mask_brain.raw
-            run_matlab flip_mask
-            $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc
-
-            if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-                minctoraw -clobber ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BefInterpol.raw
-                run_matlab flip_mask
-                $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc
-            fi
-        fi
-    #end BET pfusch
-
-    fi
-
-    #############################
-    ########   V  o  I   ########
-    #############################
-    if [[ $voi_found > 0 ]]; then
-
-        $rawtomincp -float -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain_VOI.raw ./${tmp_dir}/mask_brain.mnc # The VOI mask was created by the MATLAB script
-
-        mincresample -like ./${tmp_dir}/csi_template_zf.mnc -nearest_neighbour ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain_VOI_zf.mnc
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            $rawtomincp -float -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_VOI_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc
-        fi
-
-    #############################
-    ########   B  E  T   ########
-    #############################
-    elif [[ $bet_found > 0 ]]; then # if mask is created with brain extraction tool
-
-        # See if the user provided a -f and -g option for bet
-        BetOptionsFound=$(echo $mask_method | grep -ci "bet,\s*")
-        BetOptions=$(echo $mask_method | grep -oi "\-f +\{0,1\}-\{0,1\}[0-9]\{1,\}\.*[0-9]* \-g +\{0,1\}-\{0,1\}[0-9]\{1,\}\.*[0-9]*") # Search for sth like "-f +-0.5 -g +-0.1"
-        if [[ "$BetOptions" == "" ]]; then
-            if [[ $BetOptionsFound -eq 1 ]]; then
-                echo -e "\n\n\n\nWARNING: IT SEEMS YOU INPUTTED PARAMETERS FOR BET, BUT I COULD NOT RECOGNIZE THEM. DID YOU USE A WRONG FORMAT?\n\n\n"
-            fi
-            BetOptions="-f 0.33 -g 0" # Default Bet option when T1w used
-            if [[ $T1w_flag -eq 0 ]]; then
-                BetOptions="-f 0.7 -g 0" # Default Bet opotion otherwise
-            fi
-        fi
-        if [[ $T1w_AntiNoise_flag -eq 1 ]]; then
-            mnc2nii -quiet ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/nii_magnitude.nii
-        else
-            mnc2nii -quiet ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/nii_magnitude.nii
-        fi
-
-        # read -p "Before Mask"
+		BetOptions=${mask_method#bet,}
+		#BetOptions=$(echo $mask_method | grep -oi "\-f +\{0,1\}-\{0,1\}[0-9]\{1,\}\.*[0-9]* \-g +\{0,1\}-\{0,1\}[0-9]\{1,\}\.*[0-9]*") # Search for sth like "-f +-0.5 -g +-0.1" sd
+		if [[ "$BetOptions" == "" ]]; then
+			if [[ $BetOptionsFound -eq 1 ]]; then
+				echo -e "\n\n\n\nWARNING: IT SEEMS YOU INPUTTED PARAMETERS FOR BET, BUT I COULD NOT RECOGNIZE THEM. DID YOU USE A WRONG FORMAT?\n\n\n"
+			fi
+			BetOptions="-f 0.33 -g 0"				# Default Bet option when T1w used
+			if [[ $T1w_flag -eq 0 ]]; then
+				BetOptions="-f 0.7 -g 0"			# Default Bet opotion otherwise
+			fi
+		fi
+		#mnc2nii -quiet ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/nii_magnitude.nii 					# If brain was inputted, use BET2
+		if [[ $T1w_AntiNoise_flag -eq 1 ]]; then
+        	echo -e "\nRunning bet on data provided with flag -A:\n$T1w_AntiNoise_path"		
+			mnc2nii -quiet ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/nii_magnitude.nii
+		else
+			mnc2nii -quiet ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/nii_magnitude.nii			
+		fi
+		
         echo "Running BET now. This will take some time. $(date)"
+		#read -p "BeforeMask"
 
-        if [[ $T1w_AntiNoise_flag -eq 1 ]]; then
-            ${betp} ./${tmp_dir}/magnitude_inversion_2.nii ./${tmp_dir}/brain $BetOptions -f 0.1 -g 0.0 -n -m #-B
-            ${betp} ./${tmp_dir}/magnitude_inversion_2.nii ./${tmp_dir}/lipid $BetOptions -n -A
-        elif [[ $T1w_flag -eq 1 ]]; then
-            echo "${betp} ./${tmp_dir}/nii_magnitude.nii ./${tmp_dir}/brain -B $BetOptions -n -m &"
-            ${betp} ./${tmp_dir}/nii_magnitude.nii ./${tmp_dir}/brain -B $BetOptions -n -m & #-f 0.5 -g 0 -n -m
+        echo "${betp} ./${tmp_dir}/nii_magnitude.nii ./${tmp_dir}/brain $BetOptions -n -m &"
+        ${betp} ./${tmp_dir}/nii_magnitude.nii ./${tmp_dir}/brain $BetOptions -n -m & #-f 0.5 -g 0 -n -m
+		if [[ $T1w_flag -eq 1 ]]; then
             echo "${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/lipid $BetOptions -n -A &"
             ${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/lipid $BetOptions -n -A &
-        else
-            ${betp} ./${tmp_dir}/nii_magnitude ./${tmp_dir}/brain $BetOptions -n -m # -f 0.5 -g 0 -n -m
-        fi                                                                          # -Z # Improve results if FoV is very small in z-direction
-
+		fi
         wait && echo "BET completed."
-
-        # read -p "AfterMask"
+		
+		#read -p "AfterMask"		
         for fileniigz in brain_mask.nii.gz lipid_skull_mask.nii.gz lipid_outskin_mask.nii.gz lipid_outskull_mask.nii.gz lipid_inskull_mask.nii.gz; do
             if [ -f "./${tmp_dir}/${fileniigz}" ]; then
                 gunzip "./${tmp_dir}/${fileniigz}"
             fi
         done
+		
+		nii2mnc -quiet ./${tmp_dir}/lipid_outskin_mask.nii ./${tmp_dir}/OUTSKIN.mnc >/dev/null
+		nii2mnc -quiet ./${tmp_dir}/lipid_outskull_mask.nii ./${tmp_dir}/OUTSKULL.mnc >/dev/null
+		nii2mnc -quiet ./${tmp_dir}/lipid_inskull_mask.nii ./${tmp_dir}/INSKULL.mnc >/dev/null
 
-        nii2mnc -quiet ./${tmp_dir}/lipid_outskin_mask.nii ./${tmp_dir}/OUTSKIN.mnc >/dev/null
-        nii2mnc -quiet ./${tmp_dir}/lipid_outskull_mask.nii ./${tmp_dir}/OUTSKULL.mnc >/dev/null
-        nii2mnc -quiet ./${tmp_dir}/lipid_inskull_mask.nii ./${tmp_dir}/INSKULL.mnc >/dev/null
+		rm ./${tmp_dir}/mask_brain_unres.mnc
+		rm ./${tmp_dir}/mask_lipid_unres.mnc
 
-        rm ./${tmp_dir}/mask_brain_unres.mnc
-        rm ./${tmp_dir}/mask_lipid_unres.mnc
+		#generate brain mask in .mnc format
+		nii2mnc -quiet ./${tmp_dir}/brain_mask.nii ./${tmp_dir}/mask_brain_unres.mnc >/dev/null
+				
+		#generate lipid mask by subtracting the brain mask from the OUTSKIN mask.
+		#for definition of OUTSKIN, OUTSKULL and INSKULL see BETsurf (http://poc.vl-e.nl/distribution/manual/fsl-3.2/bet2/)
+		mincmath -sub ./${tmp_dir}/OUTSKIN.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_lipid_unres.mnc >/dev/null
 
-        #generate brain mask in .mnc format
-        nii2mnc -quiet ./${tmp_dir}/brain_mask.nii ./${tmp_dir}/mask_brain_unres.mnc >/dev/null
+		rm ./${tmp_dir}/*.nii
 
-        #generate lipid mask by subtracting the brain mask from the OUTSKIN mask.
-        #for definition of OUTSKIN, OUTSKULL and INSKULL see BETsurf (http://poc.vl-e.nl/distribution/manual/fsl-3.2/bet2/)
-        mincmath -sub ./${tmp_dir}/OUTSKIN.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_lipid_unres.mnc >/dev/null
+		#### Solving some problem with the dircos (???)
+		if [[ $T1w_flag -eq 0 ]]; then
+			minctoraw ./${tmp_dir}/mask_brain_unres.mnc -nonormalize -float > ./${tmp_dir}/mask_brain_unres.raw
+			$rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_brain_unres.raw ./${tmp_dir}/mask_brain_unres.mnc >/dev/null
+		
+			minctoraw ./${tmp_dir}/mask_lipid_unres.mnc -nonormalize -float > ./${tmp_dir}/mask_lipid_unres.raw
+			$rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_lipid_unres.raw ./${tmp_dir}/mask_lipid_unres.mnc >/dev/null
+		fi
 
-        rm ./${tmp_dir}/*.nii
+		## Resample to CSI
+		mincresample -clobber -nearest_neighbour -float -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc >/dev/null
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_lipid_unres.mnc ./${tmp_dir}/mask_lipid.mnc >/dev/null
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc		
+		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc >/dev/null
+			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_lipid_unres.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc >/dev/null
+		fi
 
-        #### Solving some problem with the dircos (???)
-        if [[ $T1w_flag -eq 0 ]]; then
-            minctoraw ./${tmp_dir}/mask_brain_unres.mnc -nonormalize -float >./${tmp_dir}/mask_brain_unres.raw
-            $rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_brain_unres.raw ./${tmp_dir}/mask_brain_unres.mnc >/dev/null
-
-            minctoraw ./${tmp_dir}/mask_lipid_unres.mnc -nonormalize -float >./${tmp_dir}/mask_lipid_unres.raw
-            $rawtomincp -float -clobber -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/mask_lipid_unres.raw ./${tmp_dir}/mask_lipid_unres.mnc >/dev/null
-        fi
-
-        ## Resample to CSI
-        mincresample -clobber -nearest_neighbour -float -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc >/dev/null
-        mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_lipid_unres.mnc ./${tmp_dir}/mask_lipid.mnc >/dev/null
-        mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc >/dev/null
-            mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_lipid_unres.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc >/dev/null
-        fi
-
-        # For some reason the mask is flipped (because of the nii-stuff?). Undo this flip
-        if [[ $T1w_flag -eq 0 ]]; then
-            minctoraw -clobber ./${tmp_dir}/mask_brain.mnc -nonormalize -float >./${tmp_dir}/mask_brain.raw
-            minctoraw ./${tmp_dir}/mask_lipid.mnc -nonormalize -float >./${tmp_dir}/mask_lipid.raw
+		# For some reason the mask is flipped (because of the nii-stuff?). Undo this flip
+		if [[ $T1w_flag -eq 0 ]]; then
+			minctoraw -clobber ./${tmp_dir}/mask_brain.mnc -nonormalize -float > ./${tmp_dir}/mask_brain.raw
+			minctoraw ./${tmp_dir}/mask_lipid.mnc -nonormalize -float > ./${tmp_dir}/mask_lipid.raw
             run_matlab flip_mask
-            $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc >/dev/null
-            $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_lipid.raw ./${tmp_dir}/mask_lipid.mnc >/dev/null
-
-            if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-                minctoraw ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BefInterpol.raw
-                minctoraw ./${tmp_dir}/mask_lipid_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_lipid_BefInterpol.raw
+			$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc >/dev/null
+			$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_lipid.raw ./${tmp_dir}/mask_lipid.mnc >/dev/null
+			
+			if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+				minctoraw ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float > ./${tmp_dir}/mask_brain_BefInterpol.raw
+				minctoraw ./${tmp_dir}/mask_lipid_BefInterpol.mnc -nonormalize -float > ./${tmp_dir}/mask_lipid_BefInterpol.raw
                 run_matlab flip_mask
-                $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc >/dev/null
-                $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_lipid_BefInterpol.raw ./${tmp_dir}/mask_lipid_BefInterpol.mnc >/dev/null
-            fi
-        fi
+				$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc >/dev/null
+				$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_lipid_BefInterpol.raw ./${tmp_dir}/mask_lipid_BefInterpol.mnc >/dev/null
+			fi
+		fi
 
-    #############################
-    ########  Threshold  ########
-    #############################
-    elif [[ $thresh_found > 0 ]]; then # if mask is thresholded
-        lower_threshold=$(echo $mask_method | grep -oi ",.*[0-9]\{1,\}\.*[0-9]*" | grep -oi "[0-9]\{1,\}\.*[0-9]*")
+	#############################
+	########  Threshold  ########
+	#############################
+	elif [[ $thresh_found > 0 ]]; then		# if mask is thresholded
+		lower_threshold=$(echo $mask_method | grep -oi ",.*[0-9]\{1,\}\.*[0-9]*" | grep -oi "[0-9]\{1,\}\.*[0-9]*")
 
-        max_magnitude=$(mincstats -quiet -max ./${tmp_dir}/magnitude.mnc)
-        if [[ "$lower_threshold" == "" ]]; then
-            lower_threshold=$(echo "scale=6 ; ${max_magnitude}/7" | bc)
-        fi
-        mincmath -clobber -segment -const2 $lower_threshold $max_magnitude ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/mask_brain_unres.mnc
+		max_magnitude=$(mincstats -quiet -max ./${tmp_dir}/magnitude.mnc)
+		if [[ "$lower_threshold" == "" ]]; then
+			lower_threshold=$(echo "scale=6 ; ${max_magnitude}/7" | bc)
+		fi
+		mincmath -clobber -segment -const2 $lower_threshold $max_magnitude ./${tmp_dir}/magnitude.mnc ./${tmp_dir}/mask_brain_unres.mnc
 
-        ## Resample to CSI
-        mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc
-        mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc
+		## Resample to CSI
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc
 
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
-            minctoraw ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BefInterpol.raw
-        fi
-        minctoraw ./${tmp_dir}/mask_brain.mnc -nonormalize -float >./${tmp_dir}/mask_brain.raw
-        minctoraw ./${tmp_dir}/mask_brain_zf.mnc -nonormalize -float >./${tmp_dir}/mask_brain_zf.raw
+		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
+			minctoraw ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float > ./${tmp_dir}/mask_brain_BefInterpol.raw
+		fi
+		minctoraw ./${tmp_dir}/mask_brain.mnc -nonormalize -float > ./${tmp_dir}/mask_brain.raw
+		minctoraw ./${tmp_dir}/mask_brain_zf.mnc -nonormalize -float > ./${tmp_dir}/mask_brain_zf.raw
         run_matlab ExtractBrain_mask
-        $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc
-        $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_zf.mnc -input ./${tmp_dir}/mask_brain_zf.raw ./${tmp_dir}/mask_brain_zf.mnc
-        if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-            $rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc
-            cp ./${tmp_dir}/mask_brain_BefInterpol.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc # For thresh method, the lipid is
-        fi
-        cp ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_lipid.mnc # avoid if conditions later
+		$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc
+		$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_zf.mnc -input ./${tmp_dir}/mask_brain_zf.raw ./${tmp_dir}/mask_brain_zf.mnc
+		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+			$rawtomincp -float -clobber -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc
+			cp ./${tmp_dir}/mask_brain_BefInterpol.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc	
+		fi		
+		# For thresh method, the lipid is useless. Create lipid masks only to avoid if conditions later
+		cp ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_lipid.mnc				
 
-    #############################
-    ########  ext. mask  ########
-    #############################
-    elif [[ "$mask_method" == */*.mnc ]]; then # if mask is inputted, COPY MASK-FILE TO tmp-FOLDER WITH CORRECT NAME
+	#############################
+	########  ext. mask  ########
+	#############################
+	elif [[ "$mask_method" == */*.mnc ]]; then						# if mask is inputted, COPY MASK-FILE TO tmp-FOLDER WITH CORRECT NAME
 
-        mincresample -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc $mask_method ./${tmp_dir}/mask_brain_zf.mnc
-        cp $mask_method ./${tmp_dir}/mask_brain.mnc
+		mincresample -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc $mask_method ./${tmp_dir}/mask_brain_zf.mnc
+		cp $mask_method ./${tmp_dir}/mask_brain.mnc
 
-    fi
-
+	fi	
+	
     #########################################
     ########   V  o  I (Once again)  ########
     #########################################

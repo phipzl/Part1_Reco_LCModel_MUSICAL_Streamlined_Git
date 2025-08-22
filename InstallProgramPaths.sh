@@ -34,6 +34,9 @@ export tmp_folder
 # Gradient Delays (measured at Vienna 7 T scanner, ~2023-10)
 export DefaultGradientDelaysForCRTTrajectory="[12.562838, 12.540197, 10.082248]"
 
+# Per Circle:
+# export DefaultGradientDelaysForCRTTrajectory="GradDelayPerAngInt_x = [11.4 11.72 11.8 11.84 13.88 13.88 14.8 17.625 13.86 15.9 11.4 15.165 11.205 10.96 11.49 12.48 11.49 10.5 12.48 10.25 10.25 10.275 10.25 11.55 10.53 11.52 9.6 9.57 10.56 9.3 9.275 9.375]; GradDelayPerAngInt_y = [9.2 9.52 9.64 9.76 11.72 11.76 13.2 15.9 12.24 14.22 9.75 13.635 9.54 9.36 9.81 10.86 9.81 8.85 10.95 8.625 8.675 8.625 8.675 10.38 9.39 10.41 8.4 8.4 9.42 8.175 8.175 8.175];"
+
 # LCModel Path
 export LCM_Path="/usr/local/lcmodel/bin/lcmodel"
 

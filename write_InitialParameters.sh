@@ -47,7 +47,7 @@ echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
 # Mandatory Input files, Output directory
 Loop_index=0
 for csi_path_dummy in ${csi_path}; do
-	((Loop_index = loop_index + 1))
+	((Loop_index = Loop_index + 1))
 	echo "csi_path{${Loop_index}} = '${csi_path_dummy}';" >> $Par
 done
 
@@ -59,7 +59,7 @@ fi
 
 Loop_index=0
 for basis_path_dummy in ${basis_path}; do
-	((Loop_index = loop_index + 1))
+	((Loop_index = Loop_index + 1))
 	echo "basis_path{${Loop_index}} = '${basis_path_dummy}';" >> $Par
 done
 echo "out_path = '${out_path}';" >> $Par
@@ -68,19 +68,19 @@ echo "out_path = '${out_path}';" >> $Par
 # Optional Input files
 Loop_index=0
 for image_normal_path_dummy in ${image_normal_path}; do
-	((Loop_index = loop_index + 1))
+	((Loop_index = Loop_index + 1))
 	echo "image_normal_path{${Loop_index}} = '${image_normal_path_dummy}';" >> $Par
 done
 
 Loop_index=0
 for image_flip_path_dummy in ${image_flip_path}; do
-	((Loop_index = loop_index + 1))
+	((Loop_index = Loop_index + 1))
 	echo "image_flip_path{${Loop_index}} = '${image_flip_path_dummy}';" >> $Par
 done
 
 Loop_index=0
 for image_VC_path_dummy in ${image_VC_path}; do
-	((Loop_index = loop_index + 1))
+	((Loop_index = Loop_index + 1))
 	echo "image_VC_path{${Loop_index}} = '${image_VC_path_dummy}';" >> $Par
 done
 
@@ -96,7 +96,7 @@ if [[ $AlignFreq_flag -eq 1 && -n $AlignFreq_MethodAndPath ]]; then				# -n test
 	fi
 	echo "AlignFreq_method = '${AlignFreq_method}';" >> $Par
 	for AlignFreq_path_dummy in ${AlignFreq_path}; do
-		((Loop_index = loop_index + 1))
+		((Loop_index = Loop_index + 1))
 		echo "AlignFreq_path{${Loop_index}} = '${AlignFreq_path_dummy}';" >> $Par
 	done
 fi
@@ -158,7 +158,7 @@ fi
 Loop_index=0
 if [[ $NonCartTraj_flag -eq 1 ]]; then
 	for dummy in ${NonCartTrajFile_path}; do
-		((Loop_index = loop_index + 1))
+		((Loop_index = Loop_index + 1))
 		echo "NonCartTrajFile_path{${Loop_index}} = '${dummy}';" >> $Par
 	done
 fi

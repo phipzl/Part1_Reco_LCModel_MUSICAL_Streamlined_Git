@@ -5,6 +5,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function MRSI_Reconstruction(tmp_dir, CurAvg)
 
+Debug_flag = false;
 
 if nargin < 2 % For those cases someone wants to run this script manually
     CurAvg = 1;
@@ -32,13 +33,25 @@ if(~isfield(Par, 'ServerInfo') || ~isfield(Par.ServerInfo,'RunLCModel_CPUCores')
 end
 
 FastPIReprocess_flag = false;
+if(endsWith(Par.Paths.csi_path{1},'mat'))
+    FastPIReprocess_flag = true;
+    load(Par.Paths.csi_path{1});
+end
+
+
 
 %% Read Noise Data
 
 if(~FastPIReprocess_flag)
 	if(Par.Flags.noisedecorrelation_flag && isfield(Par.Paths, 'noisedecorrelation_path'))
 		fprintf('\nPreparing for Noise Decorrelation.')
-        NoiseData = io_ReadAndReshapeSiemensData(Par.Paths.noisedecorrelation_path);
+        [Tmp1, ~, Tmp3] = io_ReadAndReshapeSiemensData(Par.Paths.noisedecorrelation_path);
+        if(isstruct(Tmp3) && isempty(fieldnames(Tmp3)))
+            NoiseData = Tmp1;
+        else
+            NoiseData = Tmp3;
+        end
+        clear Tmp1 Tmp3
 	end	
 end
 
@@ -113,8 +126,39 @@ if(~FastPIReprocess_flag)
 
 
 
-end
+
+%% Debug output for checking raw data
+
+if(Debug_flag)
+    mkdir([Par.Paths.out_path '/DebugOutput'])
     
+    csiData_fig1 = figure('visible','off');   
+    NoOfCircles = numel(csi.Data); 
+    for ii = 1:NoOfCircles
+        subplot(ceil(sqrt(NoOfCircles)),ceil(sqrt(NoOfCircles)),ii); plot(real(cat(1,reshape(csi.Data{ii}(:,:,:,:,:,:,:,:),[],1)))); 
+        axis off
+end
+    saveas(csiData_fig1,sprintf('%s/DebugOutput/csiRawData', Par.Paths.out_path),'epsc2')
+    close(csiData_fig1)
+    
+    csiData_fig2 = figure('visible','off');   
+    plot(real(cat(1,reshape(csi.Data{ii}(:,:,:,:,:,:,:,:),[],1)))); 
+    axis off
+    saveas(csiData_fig2,sprintf('%s/DebugOutput/csiRawData_FirstCircleOnly', Par.Paths.out_path),'epsc2')
+    close(csiData_fig2)
+
+    if(exist('image','var') && isfield(image,'Data'))
+        imageData_fig = figure('visible','off');   
+        NoOfCircles = numel(image.Data); 
+        for ii = 1:NoOfCircles
+            subplot(ceil(sqrt(NoOfCircles)),ceil(sqrt(NoOfCircles)),ii); plot(real(cat(1,reshape(image.Data{ii},[],1)))); 
+    	    axis off
+        end
+        saveas(imageData_fig,sprintf('%s/DebugOutput/imageRawData', Par.Paths.out_path),'epsc2')
+        close(imageData_fig)
+
+    end
+end
 
 
 %% MASK
@@ -513,11 +557,13 @@ if(~FastPIReprocess_flag && exist('image','var') && ~(isfield(image.Par,'dicom_f
 end
     
 if(exist('image','var') && isfield(image,'Data'))
+    image_FullFID = image;
     if(size(image.Data,4) > 3)
         image.Data = image.Data(:,:,:,4,:);	% change to 4
     else
         image.Data = image.Data(:,:,:,1,:);
     end
+    image.RecoPar.DataSize(4) = 1; image.RecoPar.vecSize = 1;
 end
 
     
@@ -596,13 +642,22 @@ if(Par.Flags.hamming_flag)
 	    if(size_csi(3) > 1 && Par.CSI.ThreeD_flag && (Par.CSI.Full_ElliptWeighted_Or_Weighted_Acq ~= 4 || UndoWeightedAcq_flag))      
             fprintf(' in 3D')  
             csi.Data = HammingFilter(csi.Data,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0);     
+            if(isfield(csi,'NoiseData'))
+                csi.NoiseData = HammingFilter(csi.NoiseData,[1 2 3],Par.Settings.hamming_factor,'OuterProduct',0); 
+            end
         else
             fprintf(' in 2D')  
             csi.Data = HammingFilter(csi.Data,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
+            if(isfield(csi,'NoiseData'))
+            	csi.NoiseData = HammingFilter(csi.NoiseData,[1 2],Par.Settings.hamming_factor,'OuterProduct',0);
+            end
 	    end 
     elseif(isfield(csi.Par,'SpatialSpectralEncoding_flag') && csi.Par.SpatialSpectralEncoding_flag && size_csi(3) > 1 && Par.CSI.ThreeD_flag)
         fprintf(' in 1D along z')  
 		csi.Data = HammingFilter(csi.Data,[3],Par.Settings.hamming_factor,'OuterProduct',0);   
+            if(isfield(csi,'NoiseData'))
+                csi.NoiseData = HammingFilter(csi.NoiseData,[3],Par.Settings.hamming_factor,'OuterProduct',0); 
+            end
 
 	end
 end
@@ -611,42 +666,37 @@ end
 %% Interpolate in kSpace
 
 
-% NOT YET REIMPLEMENTED!
+% ONLY FOR PHASE ENCODED IMPLEMENTED CURRENTLY!
+if(~iscell(csi.Data) && ~csi.RecoPar.SpatialSpectralEncoding_flag)
 if(Par.Flags.InterpolateCSIResolution_flag && Par.Settings.InterpolateCSIResolution_InkSpace)
+        Settings4Zf.PerformFFT_flag = 1;
+        Settings4Zf.EllipticalFilter_flag = Par.Settings.InterpolateCSIResolution_EllipFilter;
     if(exist('csi','var'))
-        csi = ZerofillOrCutkSpace(csi,[size(csi,1) Par.Settings.InterpolateCSIResolution size(csi,5)],1);
-        if(Par.Settings.InterpolateCSIResolution_EllipFilter)
-            csi = EllipticalFilter(csi, [2 3] ,[1 1 1 Par.Settings.InterpolateCSIResolution(1)/2-1],false);      % So far only 2D and cylindrical 3D-kspaces (circle in kx-ky, everything in kz), and only to quadratic k-spaces
-        end
-    end
-    if(exist('csi_k','var'))
-        csi_k = ZerofillOrCutkSpace(csi_k,[size(csi_k,1) Par.Settings.InterpolateCSIResolution size(csi_k,5)],0);
-        if(Par.Settings.InterpolateCSIResolution_EllipFilter)
-            csi_k = EllipticalFilter(csi_k, [2 3] ,[1 1 1 Par.Settings.InterpolateCSIResolution(1)/2-1],true);      % So far only 2D and cylindrical 3D-kspaces (circle in kx-ky, everything in kz), and only to quadratic k-spaces
-     end
+            Settings4Zf.Zerofill_To = [Par.Settings.InterpolateCSIResolution csi.RecoPar.DataSize(4:end)];
+            csi = op_ZerofillOrCutkSpace(csi,Settings4Zf);
 end
     if(exist('image','var'))
-        image = ZerofillOrCutkSpace(image,[size(image,1) Par.Settings.InterpolateCSIResolution],1);
-        if(Par.Settings.InterpolateCSIResolution_EllipFilter)
-            image = EllipticalFilter(image, [2 3] ,[1 1 1 Par.Settings.InterpolateCSIResolution(1)/2-1],false);      % So far only 2D and cylindrical 3D-kspaces (circle in kx-ky, everything in kz), and only to quadratic k-spaces
+            Settings4Zf.Zerofill_To = [Par.Settings.InterpolateCSIResolution image.RecoPar.DataSize(4:end)];
+            image = op_ZerofillOrCutkSpace(image,Settings4Zf);
         end
+        if(exist('noise_sim_PI','var'))
+            Settings4Zf.Zerofill_To = [Par.Settings.InterpolateCSIResolution size_MultiDims(noise_sim_PI,4:ndims(noise_sim_PI))];
+            noise_sim_PI = op_ZerofillOrCutkSpace(noise_sim_PI,Settings4Zf);
+        end
+        Settings4Zf.PerformFFT_flag = 0;
+        if(exist('csi_k','var'))
+            csi_k = op_ZerofillOrCutkSpace(csi_k,Settings4Zf);
     end
     if(exist('noise_sim','var'))
-        noise_sim = ZerofillOrCutkSpace(noise_sim,[size(noise_sim,1) Par.Settings.InterpolateCSIResolution size(noise_sim,5)],0);
-        if(Par.Settings.InterpolateCSIResolution_EllipFilter)
-            noise_sim = EllipticalFilter(noise_sim, [2 3] ,[1 1 1 Par.Settings.InterpolateCSIResolution(1)/2-1],true);      % So far only 2D and cylindrical 3D-kspaces (circle in kx-ky, everything in kz), and only to quadratic k-spaces
+            Settings4Zf.Zerofill_To = [Par.Settings.InterpolateCSIResolution size_MultiDims(noise_sim,4:ndims(noise_sim))];
+            noise_sim = op_ZerofillOrCutkSpace(noise_sim,Settings4Zf);
         end
+
     end
-    if(exist('noise_sim_PI','var'))
-        noise_sim_PI = ZerofillOrCutkSpace(noise_sim_PI,[size(noise_sim,1) Par.Settings.InterpolateCSIResolution size(noise_sim,5)],1);
-        if(Par.Settings.InterpolateCSIResolution_EllipFilter)
-            noise_sim_PI = EllipticalFilter(noise_sim_PI, [2 3] ,[1 1 1 Par.Settings.InterpolateCSIResolution(1)/2-1],false);      % So far only 2D and cylindrical 3D-kspaces (circle in kx-ky, everything in kz), and only to quadratic k-spaces
-        end
-    end
+
 end
 size_csi = size(csi.Data);
 size_csi(5) = size(csi.Data,5);
-
 
 %% DEBUG MODE: WRITE PHASEMAPS OF IMAGE_CORR
 
@@ -719,11 +769,12 @@ size_csi(5) = size(csi.Data,5);
 
 
 
-if(Par.Flags.LipidDecon_flag == 1 && ~Par.Flags.LipidDecon_L1_flag && ~exist([tmp_dir '/Parameters_water.mat'],'file'))
+if(~FastPIReprocess_flag && Par.Flags.LipidDecon_flag == 1 && ~Par.Flags.LipidDecon_L1_flag && ~exist([tmp_dir '/Parameters_water.mat'],'file'))
 
     csi_bak = csi;
     clear csi;
     csi = csi_bak.Data;
+    csi_bak.Data = []; % To save memory
     %save([Par.Paths.out_path '/UnCombinedCSI.mat'],'csi','-v7.3');
     %temp_x=load('/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/Process_Results/MS_3DCRT_Berni_pipeline/test_wLukas/UnCombinedCSI.mat');
     %temp_x=permute(temp_x.csi,[2 3 4 5 1]);
@@ -874,7 +925,7 @@ if(Par.Flags.LipidDecon_flag == 1 && ~Par.Flags.LipidDecon_L1_flag && ~exist([tm
 end   
 
 
-fprintf('\n\nAfter L2');  
+  
     
 
 
@@ -914,7 +965,7 @@ if(~(isfield(csi.Par,'dicom_flag') && csi.Par.dicom_flag))
 
         end
 
-        clear image image_VC
+
 
     end
 
@@ -1281,9 +1332,9 @@ if(Par.Flags.TimeInterpolation_flag)
 	if(Par.Settings.TimeInterpolationFactor(3) == 1)
 	display(['Filling to original size.'])	
 	end
+    display(['Done.']) 		
 
 end
-		display(['Done.']) 		
 
 
 %% Apply exponential Time-Domain Filter to Combined MRSI Data
@@ -1414,15 +1465,15 @@ if(exist('noise_sim','var'))
     if(Par.Flags.TwoDCaipParallelImaging_flag || Par.Flags.SliceParallelImaging_flag)
         % In case of PI: The SNR has to be calculated based on the PI-noise
         noise_sim_spectral = noise_sim_PI;
-        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],5),5) / sqrt(2*size(noise_sim_spectral,5)); % Why is this sqrt(2) necessary?  BUG: 5 --> 4 [*]
-        noise_sim_time = noise_sim_PI * 0.1370;                                                             % But without it, the spectrum is differently scaled than the LCModel spectrum.
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%      % COMMENT ON [*]: By performing an fft and dividing by sqrt(size), the std is not changed. Therefore it doesnt matter if the bug is fixed or not. 
-    %%%%%    NON-PI NOISE    %%%%%      % But the sqrt(2) has an effect. What it is for, I don't know.
+        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],4),4) / sqrt(size(noise_sim_spectral,4)); % COMMENT: I (bstr) REMOVED THE sqrt(2). I think it 
+        noise_sim_time = noise_sim_PI * 0.1370;                                                           % was used TO TAKE INTO ACCOUNT THAT WE HAVE A 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%                                                                        % COMPLEX SIGNAL, AND GET THE SNR OF A COMPLEX SIGNAL 
+    %%%%%    NON-PI NOISE    %%%%%      
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	else
         % In case of no PI: SNR calculated based on normal noise
         noise_sim_spectral = noise_sim;
-        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],5),5) / sqrt(2*size(noise_sim_spectral,5)); % BUG: 5 --> 4
+        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],4),4) / sqrt(size(noise_sim_spectral,4)); % BUG: 5 --> 4
         noise_sim_time = noise_sim * 0.1370;   % 0.1492 (originally), 0.137 (now): To make a NAA peak that has amplitude 1 in MATLAB have the concentration of 1 in LCModel.
     end
 
@@ -1460,15 +1511,15 @@ if(isfield(csi,'NoiseData'))
     if(Par.Flags.TwoDCaipParallelImaging_flag || Par.Flags.SliceParallelImaging_flag)
         % In case of PI: The SNR has to be calculated based on the PI-noise
         noise_sim_spectral = noise_sim_PI;
-        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],5),5) / sqrt(2*size(noise_sim_spectral,5)); % Why is this sqrt(2) necessary?  BUG: 5 --> 4 [*]
-        noise_sim_time = noise_sim_PI * 0.1370;                                                             % But without it, the spectrum is differently scaled than the LCModel spectrum.
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%      % COMMENT ON [*]: By performing an fft and dividing by sqrt(size), the std is not changed. Therefore it doesnt matter if the bug is fixed or not. 
-    %%%%%    NON-PI NOISE    %%%%%      % But the sqrt(2) has an effect. What it is for, I don't know.
+        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],4),4) / sqrt(size(noise_sim_spectral,4)); 
+        noise_sim_time = noise_sim_PI * 0.1370;             % 0.1492 (originally), 0.137 (now): To make a NAA peak that has amplitude 1 in MATLAB have the concentration of 1 in LCModel.                                               
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%       
+    %%%%%    NON-PI NOISE    %%%%%      
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	else
         % In case of no PI: SNR calculated based on normal noise
         noise_sim_spectral = csi.NoiseData;
-        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],5),5) / sqrt(2*size(noise_sim_spectral,5)); % BUG: 5 --> 4
+        noise_sim_spectral = fftshift(fft(noise_sim_spectral,[],4),4) / sqrt(size(noise_sim_spectral,4)); % BUG: 5 --> 4
         noise_sim_time = csi.NoiseData * 0.1370;   % 0.1492 (originally), 0.137 (now): To make a NAA peak that has amplitude 1 in MATLAB have the concentration of 1 in LCModel.
     end
 
@@ -1493,7 +1544,7 @@ if(isfield(csi,'NoiseData'))
 %     NoiseScalingMatrix_spectral3 = mean( cat(4, std(real(noise_sim3),0,4) , std(imag(noise_sim3),0,4)), 4);
     
 
-    clear scaling_inv csi.NoiseData noise_sim_PI noise_sim_time noise_sim_spectral
+    clear scaling_inv noise_sim_PI noise_sim_time noise_sim_spectral
 end 
 
 
@@ -1651,7 +1702,7 @@ end
 %% Save the processed MRSI data for SNR-Computation after LCModel processing
 
 fprintf('\n\nThe MRSI Pre-Processing and LCModel preparations took %10.6f s.\n',toc(CoilCombtic))
-clearvars -except Par csi weights image image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef
+clearvars -except Par csi weights image image_FullFID image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef NoiseCorrMatStruct NoiseData
 
 if(~IsWatRef)		% No need to save water reference
 	save([Par.Paths.out_path '/CombinedCSI.mat'], '-v7.3')

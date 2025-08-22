@@ -555,7 +555,7 @@ if ! [[ "$curdir/$BaseNameMatlabFunctions" == "$MatlabFunctionsFolder" ]]; then
 fi
 
 # zip everything
-gzip "$out_path/UsedSourcecode_Part1.tar"
+gzip -f "$out_path/UsedSourcecode_Part1.tar"
 
 # Go back to the original folder
 cd "$curdir" || exit

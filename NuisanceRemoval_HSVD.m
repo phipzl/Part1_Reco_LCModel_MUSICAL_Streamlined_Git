@@ -5,7 +5,7 @@
 %% Some definitions
 
 
-dim    = size(csi);
+dim    = size(csi.Data);
 dt     = Par.CSI.Dwelltimes(1)*1e-9;
 Factor = Par.CSI.LarmorFreq * 1e-6;
 
@@ -29,9 +29,9 @@ selParams.NtEcho        = 0;
 fprintf('\n\nRemove nuisance signals . . . ');
 NuisTic = tic;
 for i = 1:NuisRemIterations         % 3 for Phantom, 1 invivo
-    for slc = 1:size(csi,3)
-        [rho_W(:,:,1,:),csi(:,:,slc,:)] = nsRm(squeeze(csi(:,:,slc,:)), mask(:,:,slc), zeros(dim(1:2)), selParams,...
-                                          optWat, optLip, optMeta, optOther);
+    for slc = 1:size(csi.Data,3)
+        [csi.Data(:,:,slc,:),rho_W(:,:,1,:)] = nsRm_bstrchanged(squeeze(csi.Data(:,:,slc,:)), mask(:,:,slc), zeros(dim(1:2)), selParams,...
+                                          optWat, optLip, optMeta, optOther,1);
     end
 end
 fprintf('%s seconds.',num2str(toc(NuisTic)))

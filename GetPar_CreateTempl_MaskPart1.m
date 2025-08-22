@@ -351,7 +351,7 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
     
     
     if(~isfield(Par,'Settings') || ~isfield(Par.Settings,'ZeroFillMetMaps'))
-        Par.Settings.ZeroFillMetMaps = 4;
+        Par.Settings.ZeroFillMetMaps = 1;
     end
     zff = Par.Settings.ZeroFillMetMaps;
     
@@ -721,7 +721,23 @@ else
     
     Bak = Par;
     load(Par.Paths.csi_path{1},'Par')
-    Par.Flags = Bak.Flags;
+    
+    % Use only flags which are 1 in new processing, and 0 before. If its the other way round, produce an error, bc we cannot undo preprocessing.
+    fieldy = fieldnames(Bak.Flags); 
+    for ii = 1:numel(fieldy)
+        TmpFlags = Bak.Flags.(fieldy{ii}) - Par.Flags.(fieldy{ii});
+        if(TmpFlags < 0)
+            fprintf('\n\nERROR: Re-Processing dataset, which has flag %s enabled, but should be reprocessed with flag disabled.',fieldy{ii})
+            clearvars;  % So that program cannot continue in a meaningful way anymore.
+            error('\nCannot undo pre-processing steps that were previously done.\n\n\n')
+        end
+        Par.Flags.(fieldy{ii}) = TmpFlags;
+    end
+    Par.Flags.mask_flag = Bak.Flags.mask_flag;
+    Par.Flags.T1w_flag = Bak.Flags.T1w_flag;
+    
+    
+	%Par.Flags = Bak.Flags;
     Par.Paths = Bak.Paths;
     Par.Settings = Bak.Settings;
     Par.LCMControl = Bak.LCMControl;
@@ -814,7 +830,7 @@ Create_MincTemplates(tmp_dir, Par)
 
 if(Par.Flags.mask_flag)
     
-    if(~isempty(regexpi(Par.Settings.mask_method, 'voi')) || Par.CSI.ThreeD_flag ||~isempty(regexpi(Par.Settings.mask_method, 'dreid')))
+    if(~isempty(regexpi(Par.Settings.mask_method, 'voi')) || Par.CSI.ThreeD_flag)
         fprintf('\n\nCreate VoI Mask\n');
         create_mask_VOI(tmp_dir)
     end
