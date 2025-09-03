@@ -19,8 +19,10 @@ export matlabp='/bilbo/usr/local/matlab2022a/bin/matlab'
 # Brain extraction tool (bet)
 export betp='/usr/local/fsl/bin/bet'
 
+mincpath="/opt/minc"
+
 # Install Minc-Tools or include all the paths so that the script knows rawtominc, mincmath, dcm2mnc etc.
- . /opt/minc/minc-toolkit-config.sh
+ . ${mincpath}/minc-toolkit-config.sh
 
 # MATLAB Functions Folder
 LocalMatDir=$(dirname "${BASH_SOURCE[0]}")
@@ -44,6 +46,8 @@ export RunLCModelOn="lcm"		# Run LCModel on different computer, connecting via s
                             # computer, without needing to type in the password!
                             # BE AWARE THAT THIS COMPUTER HAS TO BE ABLE TO ACCESS THE "LCM_Path", THE BASIS-FILE AND THE "out_path"!
 export RunLCModelAs=""  # If you need to be a specific user on the LCModel computer. Leave empty (or dont declare it at all) if not necessary.
+
+export rawtomincp="${mincpath}/bin/rawtominc"
 
 # MATLAB Runtime (runs compiled MATLAB code without license)
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/MATLAB_Runtime_R2021b/v911/runtime/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/bin/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/os/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/opengl/lib/glnxa64

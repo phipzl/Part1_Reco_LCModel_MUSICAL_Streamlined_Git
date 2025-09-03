@@ -38,7 +38,12 @@ if(endsWith(Par.Paths.csi_path{1},'mat'))
     load(Par.Paths.csi_path{1});
 end
 
+Par.Settings.Debug_flag = Debug_flag;
 
+IsWatRef = false;
+if(Par.Flags.WaterReference_flag && (~exist([Par.Paths.out_path '/WaterReference.mat' ],'file')))
+    IsWatRef = true;
+end
 
 %% Read Noise Data
 
@@ -65,6 +70,31 @@ if(~FastPIReprocess_flag)
 	else
         [csi,image, NoiseData2,coilcompressscan] = io_ReadAndReshapeSiemensData(Par.Paths.csi_path(CurAvg),Par.Paths.NonCartTrajFile_path{1});     % Spiral sequences need external trajectory file
 	end
+    
+
+    % In case we are processing water data and it has no coilcompressscan, but the metabo scan has, then use the metabo scan
+    if(IsWatRef && ( (~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan))) ...
+                   || (isempty(image) || ~isfield(image,'Data')) )  )
+        MetCSIPar = load([tmp_dir '/Parameters.mat']);
+        Settis.OmitDataSets = {'ONLINE'};
+        [~, image2, ~,coilcompressscan2] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
+        if((~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan))))
+            coilcompressscan = coilcompressscan2;
+        end
+        if((isempty(image) || ~isfield(image,'Data')))
+            image = image2;
+        end
+        clear image2 coilcompressscan2;
+    end
+    % Also use the no of coilcompression from the Water-scan
+    if(~IsWatRef && exist([Par.Paths.out_path '/WaterReference.mat' ],'file'))
+        WaterData = load([Par.Paths.out_path '/WaterReference.mat' ]);
+        if(csi.Par.coilcompression_to_numb_coils ~= WaterData.WaterReferenceCSI.Par.coilcompression_to_numb_coils)
+            fprintf('\nWarning: Water and Metabo MRSI scans don''t have the same coil compression number.');
+        end
+        csi.Par.coilcompression_to_numb_coils = WaterData.WaterReferenceCSI.Par.coilcompression_to_numb_coils;
+        clear WaterData;
+    end
     
     if(strcmpi(csi.Par.AssumedSequence, 'CSIOrSVS'))
         if(isfield(image,'Data'))
@@ -129,7 +159,7 @@ if(~FastPIReprocess_flag)
 
 %% Debug output for checking raw data
 
-if(Debug_flag)
+if(Par.Settings.Debug_flag)
     mkdir([Par.Paths.out_path '/DebugOutput'])
     
     csiData_fig1 = figure('visible','off');   
@@ -269,140 +299,6 @@ if(Par.Flags.TwoDCaipParallelImaging_flag || Par.Flags.SliceParallelImaging_flag
 end
 
 
-%% Do CoilCompression
-% csi.Par.coilcompression_to_numb_coils=3;
-
-if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') && isfield(coilcompressscan.CoilCompScan,'Data') && isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils<csi.Par.total_channel_no_measured && csi.Par.coilcompression_to_numb_coils>0)
-    Text=sprintf('\n\n Do coil compression to %d virtual coils!',csi.Par.coilcompression_to_numb_coils);
-    disp(Text)
-
-    %set water data equals to image from iMUsical PRescan
-    for ii = 1:size(csi.Data,2); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
-    water.Data = cat(1,wuff.Data{:});
-    clear wuff
-    
-    K=csi.Par.coilcompression_to_numb_coils;
-    [rest NbCoil] = size(water.Data);
-
-%     fprintf('\n\nCoil compression: going from ',num2str(NbCoil),' to ',num2str(K),' coils.');
-
-%      Data_kc=permute(reshape(sqz(sum(Water_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil Na*Ns]),[2 1]);
-     % Data_kc=permute(reshape(sqz(mrsiReconParams.SENSE),[NbCoil M*N]),[2 1]);
-     % Data_kc=permute(reshape(sqz(sum(mrsiData_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil NbAng*NbTilt]),[2 1]);
-
-     [~,~,V_cK]=svd(water.Data,0);
-     V_cK=single(V_cK(:,1:K));
-
-      %Water data
-%      Temp=zeros([rest K],'single');
-%      for NewCoil=1:K
-%          Temp(:,NewCoil)=single(water.Data)*V_cK(:,NewCoil);
-%      end
-%      image.Data = Temp;
-    
-      for j=1:size(image.Data,2)
-         Temp{j}=zeros(  [size_MultiDims(image.Data{j},1:5) K],'single');
-         Temp2=reshape(image.Data{j},[prod(size_MultiDims(image.Data{j},1:5)) size(image.Data{j},6)]);
-         for NewCoil=1:K
-             Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(image.Data{j},1:5)]);             
-         end
-         clear Temp2
-         image.Par.DataSize{j}(6)=K;
-         image.RecoPar.DataSize{j}(6)=K;
-     end
-        image.Data = Temp;
-        clear Temp
-        clear Temp2
-        %Main Data
-     
-     for j=1:size(csi.Data,2)
-         Temp{j}=zeros(  [size_MultiDims(csi.Data{j},1:5) K],'single');
-         Temp2=reshape(csi.Data{j},[prod(size_MultiDims(csi.Data{j},1:5)) size(csi.Data{j},6)]);
-         for NewCoil=1:K
-             Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(csi.Data{j},1:5)]);
-         end
-         clear Temp2
-         csi.Par.DataSize{j}(6)=K;
-         csi.RecoPar.DataSize{j}(6)=K;
-     end
-    csi.Data = Temp;
-    clear Temp
-    clear Temp2
-    
-%     for j=1:size(csi.Data,2)
-%          Temp{j}=zeros(  [size_MultiDims(csi.Data{j},1:5) K],'single');
-%          Temp2=reshape(csi.Data{j},[prod(size_MultiDims(csi.Data{j},1:5)) size(csi.Data{j},6)]);
-         for NewCoil=1:K
-             Temp(:,NewCoil)=single(NoiseData.Data)*V_cK(:,NewCoil);
-         end
-         NoiseData.Par.DataSize(2)=K;
-%      end
-    NoiseData.Data = Temp;
-        clear Temp
- 
-    
-    image.RecoPar.total_channel_no_measured=K;
-    image.RecoPar.total_channel_no_reco=K;
-    image.Par.total_channel_no_measured=K;
-    image.Par.total_channel_no_reco=K;
-    csi.RecoPar.total_channel_no_measured=K;
-    csi.RecoPar.total_channel_no_reco=K;
-    csi.Par.total_channel_no_measured=K;
-    csi.Par.total_channel_no_reco=K;
-    NoiseData.RecoPar.total_channel_no_measured=K;
-    NoiseData.RecoPar.total_channel_no_reco=K;
-    NoiseData.Par.total_channel_no_measured=K;
-    NoiseData.Par.total_channel_no_reco=K;
-    
-
-%     if(isfield(csi,'NoiseData'))
-%         for j=1:size(csi.NoiseData,2)
-%          Temp{j}=zeros(  [size_MultiDims(csi.NoiseData{j},1:5) K],'single');
-%          Temp2=reshape(csi.NoiseData{j},[prod(size_MultiDims(csi.NoiseData{j},1:5)) size(csi.NoiseData{j},6)]);
-%          for NewCoil=1:K
-%              Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(csi.NoiseData{j},1:5)]);
-%          end
-%          clear Temp2
-%         %          csi.Par.DataSize{j}(6)=K;
-%         %          csi.RecoPar.DataSize{j}(6)=K;
-%         end
-%         csi.NoiseData = Temp;
-%         clear Temp
-%         clear Temp2
-%     end
-% 
-% % %     for j=1:size(csi.Data,2)
-% % %          Temp{j}=zeros(  [size_MultiDims(csi.Data{j},1:5) K],'single');
-% % %          Temp2=reshape(csi.Data{j},[prod(size_MultiDims(csi.Data{j},1:5)) size(csi.Data{j},6)]);
-% %          for NewCoil=1:K
-% %              Temp(:,NewCoil)=single(NoiseData.Data)*V_cK(:,NewCoil);
-% %          end
-% %          NoiseData.Par.DataSize(2)=K;
-% % %      end
-% %     NoiseData.Data = Temp;
-% %     clear Temp
-%  
-%     
-%     image.RecoPar.total_channel_no_measured=K;
-%     image.RecoPar.total_channel_no_reco=K;
-%     image.Par.total_channel_no_measured=K;
-%     image.Par.total_channel_no_reco=K;
-%     csi.RecoPar.total_channel_no_measured=K;
-%     csi.RecoPar.total_channel_no_reco=K;
-%     csi.Par.total_channel_no_measured=K;
-%     csi.Par.total_channel_no_reco=K;
-% %     NoiseData.RecoPar.total_channel_no_measured=K;
-% %     NoiseData.RecoPar.total_channel_no_reco=K;
-% %     NoiseData.Par.total_channel_no_measured=K;
-% %     NoiseData.Par.total_channel_no_reco=K;
-    
-
-
-    Par.CSI.total_channel_no=K;
-
-end
-
-
 %% Calc NoiseCorrMat
 if(isfield(NoiseData,'Data') && numel(NoiseData.Data) > 1 && Par.Flags.noisedecorrelation_flag)
     [NoiseCorrMatStruct,Dummy] = op_CalcNoiseCorrMat(NoiseData);
@@ -462,6 +358,115 @@ if(~FastPIReprocess_flag)
         end
     end
 end 
+
+
+
+%% Do CoilCompression
+% csi.Par.coilcompression_to_numb_coils=3;
+
+if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') && isfield(coilcompressscan.CoilCompScan,'Data') && isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils<csi.Par.total_channel_no_measured && csi.Par.coilcompression_to_numb_coils>0)
+    Text=sprintf('\n\n Do coil compression to %d virtual coils!',csi.Par.coilcompression_to_numb_coils);
+    disp(Text)
+
+    %set water data equals to image from iMUsical PRescan
+    for ii = 1:size(csi.Data,2); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
+    water.Data = cat(1,wuff.Data{:});
+    clear wuff
+    
+    K=csi.Par.coilcompression_to_numb_coils;
+    [rest NbCoil] = size(water.Data);
+
+%     fprintf('\n\nCoil compression: going from ',num2str(NbCoil),' to ',num2str(K),' coils.');
+
+%      Data_kc=permute(reshape(sqz(sum(Water_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil Na*Ns]),[2 1]);
+     % Data_kc=permute(reshape(sqz(mrsiReconParams.SENSE),[NbCoil M*N]),[2 1]);
+     % Data_kc=permute(reshape(sqz(sum(mrsiData_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil NbAng*NbTilt]),[2 1]);
+
+     [~,~,V_cK]=svd(water.Data,0);
+     V_cK=single(V_cK(:,1:K));
+
+      %Water data
+%      Temp=zeros([rest K],'single');
+%      for NewCoil=1:K
+%          Temp(:,NewCoil)=single(water.Data)*V_cK(:,NewCoil);
+%      end
+%      image.Data = Temp;
+    
+    if(exist('image','var') && isfield(image,'Data'))
+      for j=1:size(image.Data,2)
+         Temp{j}=zeros(  [size_MultiDims(image.Data{j},1:5) K],'single');
+         Temp2=reshape(image.Data{j},[prod(size_MultiDims(image.Data{j},1:5)) size(image.Data{j},6)]);
+         for NewCoil=1:K
+             Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(image.Data{j},1:5)]);             
+         end
+         clear Temp2
+         image.Par.DataSize{j}(6)=K;
+         image.RecoPar.DataSize{j}(6)=K;
+     end
+        image.Data = Temp;
+        clear Temp
+        clear Temp2
+        image.RecoPar.total_channel_no_measured=K;
+        image.RecoPar.total_channel_no_reco=K;
+        image.Par.total_channel_no_measured=K;
+        image.Par.total_channel_no_reco=K;
+    end
+     
+     %Main Data
+     for j=1:size(csi.Data,2)
+         Temp{j}=zeros(  [size_MultiDims(csi.Data{j},1:5) K],'single');
+         Temp2=reshape(csi.Data{j},[prod(size_MultiDims(csi.Data{j},1:5)) size(csi.Data{j},6)]);
+         for NewCoil=1:K
+             Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(csi.Data{j},1:5)]);
+         end
+         clear Temp2
+         csi.Par.DataSize{j}(6)=K;
+         csi.RecoPar.DataSize{j}(6)=K;
+     end
+    csi.Data = Temp;
+    clear Temp
+    clear Temp2
+    
+
+ 
+    
+
+    csi.RecoPar.total_channel_no_measured=K;
+    csi.RecoPar.total_channel_no_reco=K;
+    csi.Par.total_channel_no_measured=K;
+    csi.Par.total_channel_no_reco=K;
+
+    
+
+    
+    if(isfield(csi,'NoiseData'))
+        for j=1:size(csi.NoiseData,2)
+         Temp{j}=zeros(  [size_MultiDims(csi.NoiseData{j},1:5) K],'single');
+         Temp2=reshape(csi.NoiseData{j},[prod(size_MultiDims(csi.NoiseData{j},1:5)) size(csi.NoiseData{j},6)]);
+         for NewCoil=1:K
+             Temp{j}(:,:,:,:,:,NewCoil)=reshape(single(Temp2)*V_cK(:,NewCoil),[size_MultiDims(csi.NoiseData{j},1:5)]);
+end
+         clear Temp2
+        %          csi.Par.DataSize{j}(6)=K;
+        %          csi.RecoPar.DataSize{j}(6)=K;
+end
+        csi.NoiseData = Temp;
+        clear Temp
+        clear Temp2
+end
+
+
+
+	
+
+    
+
+
+    Par.CSI.total_channel_no=K;
+
+        end
+
+
 
 
 %% Perform Fourier Transform of image
@@ -667,7 +672,7 @@ end
 
 
 % ONLY FOR PHASE ENCODED IMPLEMENTED CURRENTLY!
-if(~iscell(csi.Data) && ~csi.RecoPar.SpatialSpectralEncoding_flag)
+if(~iscell(csi.Data) && isfield_recursive(csi,'RecoPar.SpatialSpectralEncoding_flag') && ~csi.RecoPar.SpatialSpectralEncoding_flag)
 if(Par.Flags.InterpolateCSIResolution_flag && Par.Settings.InterpolateCSIResolution_InkSpace)
         Settings4Zf.PerformFFT_flag = 1;
         Settings4Zf.EllipticalFilter_flag = Par.Settings.InterpolateCSIResolution_EllipFilter;
@@ -1601,13 +1606,13 @@ end
 %% Handle Water Reference
 
     % Initialize WatRef variables
-    IsWatRef = false;            % Flag telling if the current processed data set "csi" is a water-reference (either W1- or W2-method).
+%     IsWatRef = false;            % Flag telling if the current processed data set "csi" is a water-reference (either W1- or W2-method).
     IsW2WatRef = false;            % Flag telling if it is W1- or W2-method
 
     if(Par.Flags.WaterReference_flag)
 
         if(~exist([Par.Paths.out_path '/WaterReference.mat' ],'file') )
-            IsWatRef = true;
+
 
             % W1 & W2 --> If water does not exist yet, save it
             WaterReferenceCSI = csi;
