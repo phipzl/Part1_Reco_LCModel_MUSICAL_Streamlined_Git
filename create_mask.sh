@@ -256,7 +256,7 @@ if [[ $mask_flag -eq 1 ]]; then
     #########################################
     ########   V  o  I (Once again)  ########
     #########################################
-    if [[ $voi_found -gt 0 && -f "./${tmp_dir}/mask_brain_VOI.mnc" ]]; then
+	if [[ -f "./${tmp_dir}/mask_brain_VOI.mnc" ]]; then
 
         if [[ -f "./${tmp_dir}/mask_brain.mnc" ]]; then
             mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_brain2.mnc
