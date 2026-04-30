@@ -341,6 +341,12 @@ if(isempty(regexp(Par.Paths.csi_path{1},'.*/\w*\.mat','ONCE')))			% Only read he
     end
     
     % Stepsize (Voxel Size)
+    if(csiPars.nFreqEnc == 1)
+        csiPars.FoV_Read = csiPars.VoI_Read;
+    end
+    if(csiPars.nPhasEnc == 1)
+        csiPars.FoV_Phase = csiPars.VoI_Phase;
+    end
     csiPars.StepRead = -csiPars.FoV_Read(1) / csiPars.nFreqEnc;		% Coordinate system is reversed in minc with respect to DICOM
     csiPars.StepPhase = -csiPars.FoV_Phase(1) / csiPars.nPhasEnc;
     if(csiPars.nPartEnc == 1)

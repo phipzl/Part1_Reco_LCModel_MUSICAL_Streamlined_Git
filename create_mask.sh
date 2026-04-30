@@ -44,9 +44,18 @@ if [[ $T1w_flag -eq 1 ]]; then # if T1_map is inputted, create magnitude minc fi
     if [[ "$T1w_path" == */*.mnc ]]; then # Copy magnitude.mnc if T1w_path is minc-file.
         cp $T1w_path ./${tmp_dir}/magnitude.mnc
     else # Only perform the dcm2mnc stuff if T1w_path is NOT a minc-file
-        dcm2mnc $T1w_path -dname ./${tmp_dir} -fname magnitude .
+    
+        #dcm2mnc $T1w_path -dname ./${tmp_dir} -fname magnitude .
+		dcm2niix -o ${tmp_dir} -z n -f magnitude $T1w_path
+		nii2mnc ${tmp_dir}/magnitude.nii ${tmp_dir}/magnitude.mnc
+    
+    
+#        dcm2mnc $T1w_path -dname ./${tmp_dir} -fname magnitude .
         if [[ $T1w_AntiNoise_flag -eq 1 ]]; then # If there was inputted another 3D-measurement for removing the noise of the T1w-image around the head.
-            dcm2mnc $T1w_AntiNoise_path -dname ./${tmp_dir} -fname magnitude_AntiNoise .
+            #dcm2mnc $T1w_AntiNoise_path -dname ./${tmp_dir} -fname magnitude_AntiNoise .
+    		dcm2niix -o ${tmp_dir} -z n -f magnitude_AntiNoise $T1w_AntiNoise_path
+			nii2mnc ${tmp_dir}/magnitude_AntiNoise.nii ${tmp_dir}/magnitude_AntiNoise.mnc
+    
             max_magnitude=$(mincstats -quiet -max ./${tmp_dir}/magnitude_AntiNoise.mnc)
             lower_threshold=$(echo "scale=6 ; ${max_magnitude}/25" | bc)
             mincmath -clobber -segment -const2 $lower_threshold $max_magnitude ./${tmp_dir}/magnitude_AntiNoise.mnc ./${tmp_dir}/mask_AntiNoise.mnc
