@@ -169,6 +169,7 @@ export control_echo_flag=0
 export basis_echo_flag=0
 export XPACE_motion_correction_flag=0
 export julia_reconstruction=0
+export deep_learning_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
 export compiled_matlab_flag=0
@@ -184,7 +185,7 @@ LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -346,6 +347,9 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     K)
         export compiled_matlab_flag=1
         ;;
+    Q)
+        export deep_learning_flag=1
+        ;;
     l)
         export dont_compute_LCM_flag=1
         ;;
@@ -400,6 +404,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
+-Q  Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -423,6 +428,7 @@ mkdir -p "$out_path/maps"
 mkdir -p "$out_path/phamaps"
 mkdir -p "$out_path/spectra"
 mkdir -p "$out_path/scalings"
+deep_learning_output_dir="$out_path/deepMRSI"
 
 # Set kSpaceCorrection to Default value written in InstallProgramPaths.sh
 if [[ $GradientDelay_flag -eq 1 ]]; then
@@ -504,7 +510,11 @@ done
 #7.
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 echo -e "\n\n7. Start LCModel Processing\n\n"
-if [[ $dont_compute_LCM_flag -eq 0 ]]; then
+if [[ $deep_learning_flag -eq 1 ]]; then
+    mkdir -p "$deep_learning_output_dir"
+    echo -e "\nRun this command: python ./run_deepmrsi.py $abs_tmp_dir $deep_learning_output_dir"
+    python ./run_deepmrsi.py "$abs_tmp_dir" "$deep_learning_output_dir"
+elif [[ $dont_compute_LCM_flag -eq 0 ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
 
