@@ -3,25 +3,31 @@
 run_deepmrsi.py: bridge between the MRSI pipeline and the deepmrsi quantification.
 
 Called from step 7 of Part1_ProcessMRSI.sh when the -Q flag is set:
-    python run_deepmrsi.py <tmp_dir> <output_dir>
+    python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walinet_model Y]
 
 Reads the NIfTI files that the reconstruction wrote to <out_path>/deepmrsi_inputs/,
 calls process_deep_mrsi_offline() of the deep_crt_mrsi package and writes the
 metabolite maps as NIfTI to <output_dir>.
 """
 
+import argparse
 import json
 import os
 import sys
 
 import numpy as np
 
-if len(sys.argv) < 3:
-    print(f"Usage: python {sys.argv[0]} <tmp_dir> <output_dir>", file=sys.stderr)
-    sys.exit(1)
+parser = argparse.ArgumentParser(description="Quantify the reconstructed MRSI data with deepmrsi.")
+parser.add_argument("tmp_dir", help="temporary directory of the current run")
+parser.add_argument("output_dir", help="directory the metabolic maps are written to")
+parser.add_argument("--fitting", choices=("dlfit", "gpufit", "off"), default=None,
+                    help="fitting backend, deepmrsi decides if it is not given")
+parser.add_argument("--walinet_model", choices=("legacy_7T", "final_7T", "final_3T", "off"), default=None,
+                    help="WALINET model for the lipid suppression, deepmrsi decides if it is not given")
+args = parser.parse_args()
 
-tmp_dir = sys.argv[1]
-output_dir = sys.argv[2]
+tmp_dir = args.tmp_dir
+output_dir = args.output_dir
 
 
 def find_inputs_dir(tmp_dir):
@@ -67,11 +73,18 @@ info = {
     "fov_slice": meta["fov_slice"],                # mm
 }
 # Optional settings that deepmrsi understands, only passed on if they are there
-for key in ("bet_f", "bet_g", "walinet", "lipidSuppression_beta",
-            "use_prescan_for_masking", "writeWithoutSuppression",
-            "makehomogeneous_sigma"):
+for key in ("bet_f", "bet_g", "walinet", "walinet_model", "fitting",
+            "lipidSuppression_beta", "use_prescan_for_masking",
+            "writeWithoutSuppression", "makehomogeneous_sigma"):
     if key in meta:
         info[key] = meta[key]
+
+# The command line wins over the metadata. If neither sets them, deepmrsi keeps
+# its own defaults.
+if args.fitting is not None:
+    info["fitting"] = args.fitting
+if args.walinet_model is not None:
+    info["walinet_model"] = args.walinet_model
 
 try:
     import nibabel as nib
@@ -130,6 +143,8 @@ except ImportError as e:
 print(f"run_deepmrsi: calling process_deep_mrsi_offline, output to {output_dir}")
 print(f"  dwelltime={info['dwelltime']} ms, larmor_frequency={info['larmor_frequency']} Hz")
 print(f"  inplane_res={info['inplane_res']} mm, fov_slice={info['fov_slice']} mm")
+print(f"  fitting={info.get('fitting', 'deepmrsi default')}, "
+      f"walinet_model={info.get('walinet_model', 'deepmrsi default')}")
 
 process_deep_mrsi_offline(fid, patref, info, output_dir, uncomb_prescan=prescan)
 

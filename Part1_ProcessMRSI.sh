@@ -184,6 +184,8 @@ export phase_encoding_direction_is="AP"
 LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
+export deep_learning_fitting=""
+export deep_learning_walinet_model=""
 
 while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
     case $OPTION in
@@ -349,6 +351,17 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         ;;
     Q)
         export deep_learning_flag=1
+        # The fitting backend and the WALINET model are optional arguments of -Q,
+        # taken in that order. Same rule as for -S: only take the next word if it
+        # exists and is not the next option.
+        for QArgument in deep_learning_fitting deep_learning_walinet_model; do
+            NextArg=""
+            [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+                export "$QArgument=$NextArg"
+                ((OPTIND = OPTIND + 1))
+            fi
+        done
         ;;
     l)
         export dont_compute_LCM_flag=1
@@ -404,7 +417,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI.
+-Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"legacy_7T\", \"final_7T\", \"final_3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -512,8 +525,15 @@ done
 echo -e "\n\n7. Start LCModel Processing\n\n"
 if [[ $deep_learning_flag -eq 1 ]]; then
     mkdir -p "$deep_learning_output_dir"
-    echo -e "\nRun this command: python ./run_deepmrsi.py $abs_tmp_dir $deep_learning_output_dir"
-    python ./run_deepmrsi.py "$abs_tmp_dir" "$deep_learning_output_dir"
+    DeepLearningOptions=()
+    if [[ -n $deep_learning_fitting ]]; then
+        DeepLearningOptions+=(--fitting "$deep_learning_fitting")
+    fi
+    if [[ -n $deep_learning_walinet_model ]]; then
+        DeepLearningOptions+=(--walinet_model "$deep_learning_walinet_model")
+    fi
+    echo -e "\nRun this command: python ./run_deepmrsi.py $abs_tmp_dir $deep_learning_output_dir ${DeepLearningOptions[*]}"
+    python ./run_deepmrsi.py "$abs_tmp_dir" "$deep_learning_output_dir" "${DeepLearningOptions[@]}"
 elif [[ $dont_compute_LCM_flag -eq 0 ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
