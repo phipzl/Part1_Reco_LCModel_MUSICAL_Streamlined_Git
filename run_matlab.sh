@@ -19,8 +19,78 @@ run_matlab() {
     fi
 }
 
+# Returns 0 (true) if the current reconstruction call is the water reference pass.
+is_water_reference_pass() {
+    if [[ $WaterReference_flag -eq 1 ]] && [[ ! -f "$out_path/WaterReference.mat" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# The Julia version reconstructs the data, but the LCModel files are still written
+# by MATLAB. Returns 0 (true) if that writer is available.
+julia_lcm_writer_available() {
+    if [[ $compiled_matlab_flag -eq 1 ]]; then
+        [[ -x "$MatlabCompiledFunctions/julia_write_lcm_files" ]]
+    else
+        [[ -f "$MatlabFunctionsFolder/julia_write_lcm_files.m" ]]
+    fi
+}
+
+# Argument $1: CurAv argument for run_julia_reco.jl
+# Returns non-zero if nothing was reconstructed, so the caller can use MATLAB instead.
+run_julia_reconstruction() {
+    local OnlyInMatlab=()
+    [[ $TwoDCaipParallelImaging_flag -eq 1 ]] && OnlyInMatlab+=("-r (2D-Caipirinha parallel imaging)")
+    [[ $SliceParallelImaging_flag -eq 1 ]] && OnlyInMatlab+=("-R (slice parallel imaging)")
+    [[ $NonCartTraj_flag -eq 1 ]] && OnlyInMatlab+=("-s (trajectory file)")
+    [[ $TimeInterpolation_flag -eq 1 ]] && OnlyInMatlab+=("-T (time interpolation)")
+    [[ $FirstOrderPhaseCorr_flag -eq 1 ]] && OnlyInMatlab+=("-F (first order phase correction)")
+    [[ $FirstOrderPhaseModulation_flag -eq 1 ]] && OnlyInMatlab+=("-k (first order phase modulation)")
+    [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal)")
+
+    if [[ ${#OnlyInMatlab[@]} -gt 0 ]]; then
+        echo -e "\nThe Julia reconstruction does not implement:"
+        for Option in "${OnlyInMatlab[@]}"; do
+            echo "    $Option"
+        done
+        return 1
+    fi
+    if is_water_reference_pass; then
+        echo -e "\nThe water reference is reconstructed by MATLAB, the Julia version cannot write WaterReference.mat."
+        return 1
+    fi
+    if ! julia_lcm_writer_available; then
+        echo -e "\nThe Julia output cannot be used, julia_write_lcm_files was not found."
+        return 1
+    fi
+
+    local ScriptDir
+    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    echo -e "\nRun this command: JULIA_NUM_THREADS=$julia_n_threads julia $ScriptDir/run_julia_reco.jl $abs_tmp_dir $1 $julia_mmap"
+    JULIA_NUM_THREADS="$julia_n_threads" julia "$ScriptDir/run_julia_reco.jl" "$abs_tmp_dir" "$1" "$julia_mmap" || return 1
+
+    # The LCModel files are written once, after the last average
+    if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
+        return 0
+    fi
+    if [[ $compiled_matlab_flag -eq 1 ]]; then
+        echo -e "\nRun this command: $MatlabCompiledFunctions/julia_write_lcm_files $abs_tmp_dir"
+        "$MatlabCompiledFunctions/julia_write_lcm_files" "$abs_tmp_dir"
+    else
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir')\""
+        $matlabp -nodisplay -r "addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir'); exit"
+    fi
+}
+
 # Argument $1: CurAv argument for MRSI_Reconstruction.m
 run_mrsi_reconstruction() {
+    if [[ $julia_reconstruction -eq 1 ]]; then
+        if run_julia_reconstruction "$1"; then
+            return 0
+        fi
+        echo -e "Use the MATLAB reconstruction instead.\n"
+    fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then
         # run the compiled matlab function
         echo -e "\nRun this command: $MatlabCompiledFunctions/MRSI_Reconstruction $abs_tmp_dir $1"
