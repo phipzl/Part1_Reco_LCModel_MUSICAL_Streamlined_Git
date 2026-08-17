@@ -142,12 +142,15 @@ result = MRSI.reconstruct(
     zero_fill = zero_fill_flag,
 )
 
-csi_data = if result isa AbstractArray
+# MRSI.reconstruct returns the CSI array of the single repetition, but the Vector of
+# all repetitions as soon as the dataset has more than one.
+csi_data = if result isa AbstractVector{<:AbstractArray}
+    length(result) == 1 || error("$dat_file has $(length(result)) repetitions. " *
+                                 "This pipeline averages over files, not over repetitions, " *
+                                 "so the Julia reconstruction cannot be used for it.")
+    Array{ComplexF32}(result[1])
+elseif result isa AbstractArray
     Array{ComplexF32}(result)
-elseif hasproperty(result, :data)
-    Array{ComplexF32}(result.data)
-elseif hasproperty(result, :csi)
-    Array{ComplexF32}(result.csi)
 else
     error("Unexpected return type of MRSI.reconstruct(): $(typeof(result))")
 end
