@@ -49,6 +49,13 @@ export RunLCModelAs=""  # If you need to be a specific user on the LCModel compu
 
 export rawtomincp="${mincpath}/bin/rawtominc"
 
+# Julia package environments. JULIA_MRSI_PKG is the directory holding the
+# Project.toml of MRSI.jl, JULIA_DEEPMRSI_PKG the one of the deep learning
+# environment. Leave empty if the packages are already in the default Julia
+# environment; nothing uses these variables unless they are set.
+export JULIA_MRSI_PKG=""
+export JULIA_DEEPMRSI_PKG=""
+
 # MATLAB Runtime (runs compiled MATLAB code without license)
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/MATLAB_Runtime_R2021b/v911/runtime/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/bin/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/os/glnxa64:/opt/MATLAB_Runtime_R2021b/v911/sys/opengl/lib/glnxa64
 export MatlabCompiledFunctions="Matlab_Compiled"
