@@ -118,7 +118,9 @@ if get(p, "GradientDelay_flag", 0) == 1
     gd_str = string(get(p, "GradientDelay", ""))
     if !isempty(gd_str) && gd_str != "0"
         try
-            gradient_delay_us = parse_gradient_delays(gd_str)
+            # "global" is required: try opens a soft scope, so a bare assignment
+            # would create a local and the parsed delays would be discarded.
+            global gradient_delay_us = parse_gradient_delays(gd_str)
         catch e
             @warn "Could not read GradientDelay '$gd_str', using the MRSI.jl defaults: $e"
         end
