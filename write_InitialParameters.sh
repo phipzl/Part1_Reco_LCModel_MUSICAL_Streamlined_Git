@@ -336,4 +336,4 @@ END {
     print "}"
 }
 ' "$Par" >"$ParJson"
-chmod 755 $ParJson
+chmod 644 "$ParJson"
