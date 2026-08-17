@@ -28,13 +28,18 @@ is_water_reference_pass() {
 }
 
 # The Julia version reconstructs the data, but the LCModel files are still written
-# by MATLAB. Returns 0 (true) if that writer is available.
+# by MATLAB. Returns 0 (true) if that writer is available. MATLAB reaches the .m files
+# of this project either through addpath(genpath("$MatlabFunctionsFolder")), so they can
+# sit in any subfolder, or through the script folder itself, so search both.
 julia_lcm_writer_available() {
     if [[ $compiled_matlab_flag -eq 1 ]]; then
         [[ -x "$MatlabCompiledFunctions/julia_write_lcm_files" ]]
-    else
-        [[ -f "$MatlabFunctionsFolder/julia_write_lcm_files.m" ]]
+        return
     fi
+    local ScriptDir
+    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    [[ -f "$ScriptDir/julia_write_lcm_files.m" ]] && return 0
+    [[ -n $(find -L "$MatlabFunctionsFolder" -name julia_write_lcm_files.m -print -quit 2>/dev/null) ]]
 }
 
 # Argument $1: CurAv argument for run_julia_reco.jl
