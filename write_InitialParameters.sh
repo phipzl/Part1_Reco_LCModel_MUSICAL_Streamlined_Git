@@ -226,17 +226,46 @@ function JsonEscape(Str,   Out, Pos, Char) {
     return Out
 }
 
-{
-    Line = $0
-    gsub(/\r/, "", Line)
+# One line can hold several MATLAB statements ("InPlaneCaipPattern = [...]; VD_Radius = 3;"),
+# so cut it at every ";" that is outside brackets and outside a quoted string. Splitting on
+# every ";" would tear MATLAB row separators like [1 2; 3 4] apart.
+function SplitStatements(Line, Parts,   Pos, Char, Depth, InQuote, Cur, NrOfParts) {
+    NrOfParts = 0
+    Depth = 0
+    InQuote = 0
+    Cur = ""
+    for (Pos = 1; Pos <= length(Line); Pos++) {
+        Char = substr(Line, Pos, 1)
+        if (Char == Quote)
+            InQuote = !InQuote
+        else if (!InQuote && (Char == "[" || Char == "(" || Char == "{"))
+            Depth = Depth + 1
+        else if (!InQuote && Depth > 0 && (Char == "]" || Char == ")" || Char == "}"))
+            Depth = Depth - 1
+        if (Char == ";" && !InQuote && Depth == 0) {
+            NrOfParts = NrOfParts + 1
+            Parts[NrOfParts] = Cur
+            Cur = ""
+        } else {
+            Cur = Cur Char
+        }
+    }
+    NrOfParts = NrOfParts + 1
+    Parts[NrOfParts] = Cur
+    return NrOfParts
+}
+
+# Statements that do not assign to a plain variable name, like the element assignment
+# "InPlaneCaipPattern([4 7]) = 1", cannot be expressed in JSON and are skipped here.
+function HandleStatement(Line,   EqualPos, Name, Value, CellNr, BracePos, IsQuoted) {
     sub(/^[ \t]+/, "", Line)
     sub(/[ \t]+$/, "", Line)
     if (Line == "" || substr(Line, 1, 1) == "%")
-        next
+        return
 
     EqualPos = index(Line, "=")
     if (EqualPos == 0)
-        next
+        return
     Name = substr(Line, 1, EqualPos - 1)
     Value = substr(Line, EqualPos + 1)
     sub(/[ \t]+$/, "", Name)
@@ -252,10 +281,10 @@ function JsonEscape(Str,   Out, Pos, Char) {
         CellNr = substr(Name, BracePos + 1, index(Name, "}") - BracePos - 1) + 0
         Name = substr(Name, 1, BracePos - 1)
         if (CellNr < 1)
-            next
+            return
     }
     if (Name !~ /^[A-Za-z_][A-Za-z_0-9]*$/)
-        next
+        return
 
     if (!(Name in Seen)) {
         Seen[Name] = 1
@@ -278,6 +307,14 @@ function JsonEscape(Str,   Out, Pos, Char) {
         # MATLAB arrays and expressions survive as the strings they are.
         IsNumber[Name] = (!IsQuoted && Value ~ /^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$/)
     }
+}
+
+{
+    Line = $0
+    gsub(/\r/, "", Line)
+    NrOfParts = SplitStatements(Line, Parts)
+    for (PartNr = 1; PartNr <= NrOfParts; PartNr++)
+        HandleStatement(Parts[PartNr])
 }
 
 END {
