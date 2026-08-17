@@ -19,12 +19,15 @@ run_matlab() {
     fi
 }
 
-# Returns 0 (true) if the current reconstruction call is the water reference pass.
-is_water_reference_pass() {
-    if [[ $WaterReference_flag -eq 1 ]] && [[ ! -f "$out_path/WaterReference.mat" ]]; then
-        return 0
-    fi
-    return 1
+# Returns 0 (true) if -w and -S may not be mixed, and says why.
+julia_conflicts_with_water_reference() {
+    [[ $WaterReference_flag -ne 1 ]] && return 1
+    echo -e "\nThe water reference (-w) cannot be combined with the Julia reconstruction (-S):"
+    echo "    the Julia version cannot write WaterReference.mat, so the water pass would run in MATLAB,"
+    echo "    and MRSI_Reconstruction.m then re-uses the coil weights stored in WaterReference.mat"
+    echo "    while MRSI.reconstruct does its own coil combination. Water and metabolites would be"
+    echo "    combined differently and could not be compared."
+    return 0
 }
 
 # The Julia version reconstructs the data, but the LCModel files are still written
@@ -61,8 +64,7 @@ run_julia_reconstruction() {
         done
         return 1
     fi
-    if is_water_reference_pass; then
-        echo -e "\nThe water reference is reconstructed by MATLAB, the Julia version cannot write WaterReference.mat."
+    if julia_conflicts_with_water_reference; then
         return 1
     fi
     if ! julia_lcm_writer_available; then
