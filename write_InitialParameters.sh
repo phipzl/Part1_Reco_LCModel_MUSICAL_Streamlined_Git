@@ -42,6 +42,7 @@ echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par
 echo "DebugAdditionalInput_flag = ${NonCartTraj_flag};" >> $Par
 echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
+echo "julia_reconstruction = ${julia_reconstruction};" >> $Par
 
 
 # Mandatory Input files, Output directory
