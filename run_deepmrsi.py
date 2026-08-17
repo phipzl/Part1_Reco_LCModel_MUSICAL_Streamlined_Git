@@ -33,20 +33,16 @@ def find_inputs_dir(tmp_dir):
     candidate = os.path.join(os.path.dirname(tmp_dir), "deepmrsi_inputs")
     if os.path.isdir(candidate):
         return candidate
-    # Otherwise take out_path out of the parameter file
-    par_file = os.path.join(tmp_dir, "InitialParameters.m")
+    # Otherwise take out_path out of the parameter file. write_InitialParameters.sh
+    # writes it as JSON next to the MATLAB one, so nothing has to be scanned here.
+    par_file = os.path.join(tmp_dir, "InitialParameters.json")
     if os.path.isfile(par_file):
         with open(par_file) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("out_path"):
-                    # e.g.  out_path = '/some/path';
-                    parts = line.split("=", 1)
-                    if len(parts) == 2:
-                        val = parts[1].strip().rstrip(";").strip().strip("'").strip('"')
-                        candidate = os.path.join(val, "deepmrsi_inputs")
-                        if os.path.isdir(candidate):
-                            return candidate
+            out_path = json.load(f).get("out_path", "")
+        if out_path:
+            candidate = os.path.join(out_path, "deepmrsi_inputs")
+            if os.path.isdir(candidate):
+                return candidate
     raise FileNotFoundError(
         f"No deepmrsi_inputs directory found near tmp_dir={tmp_dir!r}. "
         "The reconstruction has to write the deep learning inputs first."
