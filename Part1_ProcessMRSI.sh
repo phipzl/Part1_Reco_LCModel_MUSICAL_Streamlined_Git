@@ -298,9 +298,16 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     S)
         export julia_reconstruction=1
         export julia_n_threads="$OPTARG"
-        julia_mmap=${!OPTIND}
-        if [[ -z $julia_mmap ]]; then
-            julia_mmap="false"
+        # The mmap argument is optional. Only take the next word if there is
+        # one and it is not the next option, otherwise "-S auto -t [T1]" would
+        # silently use "-t" as mmap setting and then process -t twice.
+        julia_mmap="false"
+        if [[ $OPTIND -le $# ]]; then
+            NextArg=${!OPTIND}
+            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+                julia_mmap="$NextArg"
+                ((OPTIND = OPTIND + 1))
+            fi
         fi
         ;;
     t)
