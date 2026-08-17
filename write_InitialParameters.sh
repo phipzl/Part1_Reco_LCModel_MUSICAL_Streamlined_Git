@@ -42,6 +42,7 @@ echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par
 echo "DebugAdditionalInput_flag = ${NonCartTraj_flag};" >> $Par
 echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
+echo "julia_reconstruction = ${julia_reconstruction};" >> $Par
 
 
 # Mandatory Input files, Output directory
@@ -195,3 +196,144 @@ fi
 if ! [[ ${RunLCModel_CPUCores} = "" ]]; then
 	echo "RunLCModel_CPUCores = ${RunLCModel_CPUCores};" >> $Par
 fi
+
+
+##########################################################
+#### WRITE THE SAME PARAMETERS AS JSON FOR NON-MATLAB ####
+##########################################################
+# InitialParameters.m is MATLAB source, so every reader that is not MATLAB has
+# to implement a MATLAB parser first. Read the file back in and write the same
+# content as JSON next to it, so both files can never disagree.
+
+ParJson="${tmp_dir}/InitialParameters.json"
+awk '
+BEGIN {
+    Quote = sprintf("%c", 39)
+    NrOfKeys = 0
+}
+
+function JsonEscape(Str,   Out, Pos, Char) {
+    Out = ""
+    for (Pos = 1; Pos <= length(Str); Pos++) {
+        Char = substr(Str, Pos, 1)
+        if (Char == "\\")
+            Out = Out "\\\\"
+        else if (Char == "\"")
+            Out = Out "\\\""
+        else
+            Out = Out Char
+    }
+    return Out
+}
+
+# One line can hold several MATLAB statements ("InPlaneCaipPattern = [...]; VD_Radius = 3;"),
+# so cut it at every ";" that is outside brackets and outside a quoted string. Splitting on
+# every ";" would tear MATLAB row separators like [1 2; 3 4] apart.
+function SplitStatements(Line, Parts,   Pos, Char, Depth, InQuote, Cur, NrOfParts) {
+    NrOfParts = 0
+    Depth = 0
+    InQuote = 0
+    Cur = ""
+    for (Pos = 1; Pos <= length(Line); Pos++) {
+        Char = substr(Line, Pos, 1)
+        if (Char == Quote)
+            InQuote = !InQuote
+        else if (!InQuote && (Char == "[" || Char == "(" || Char == "{"))
+            Depth = Depth + 1
+        else if (!InQuote && Depth > 0 && (Char == "]" || Char == ")" || Char == "}"))
+            Depth = Depth - 1
+        if (Char == ";" && !InQuote && Depth == 0) {
+            NrOfParts = NrOfParts + 1
+            Parts[NrOfParts] = Cur
+            Cur = ""
+        } else {
+            Cur = Cur Char
+        }
+    }
+    NrOfParts = NrOfParts + 1
+    Parts[NrOfParts] = Cur
+    return NrOfParts
+}
+
+# Statements that do not assign to a plain variable name, like the element assignment
+# "InPlaneCaipPattern([4 7]) = 1", cannot be expressed in JSON and are skipped here.
+function HandleStatement(Line,   EqualPos, Name, Value, CellNr, BracePos, IsQuoted) {
+    sub(/^[ \t]+/, "", Line)
+    sub(/[ \t]+$/, "", Line)
+    if (Line == "" || substr(Line, 1, 1) == "%")
+        return
+
+    EqualPos = index(Line, "=")
+    if (EqualPos == 0)
+        return
+    Name = substr(Line, 1, EqualPos - 1)
+    Value = substr(Line, EqualPos + 1)
+    sub(/[ \t]+$/, "", Name)
+    sub(/^[ \t]+/, "", Value)
+    sub(/[ \t]+$/, "", Value)
+    sub(/;$/, "", Value)
+    sub(/[ \t]+$/, "", Value)
+
+    # Cell array entry "Name{Nr} = ...", plain assignment otherwise
+    CellNr = 0
+    BracePos = index(Name, "{")
+    if (BracePos > 0) {
+        CellNr = substr(Name, BracePos + 1, index(Name, "}") - BracePos - 1) + 0
+        Name = substr(Name, 1, BracePos - 1)
+        if (CellNr < 1)
+            return
+    }
+    if (Name !~ /^[A-Za-z_][A-Za-z_0-9]*$/)
+        return
+
+    if (!(Name in Seen)) {
+        Seen[Name] = 1
+        NrOfKeys = NrOfKeys + 1
+        Keys[NrOfKeys] = Name
+    }
+
+    IsQuoted = (length(Value) >= 2 && substr(Value, 1, 1) == Quote && substr(Value, length(Value), 1) == Quote)
+    if (IsQuoted)
+        Value = substr(Value, 2, length(Value) - 2)
+
+    if (CellNr > 0) {
+        IsCell[Name] = 1
+        CellValue[Name, CellNr] = Value
+        if (CellNr > CellSize[Name])
+            CellSize[Name] = CellNr
+    } else {
+        SimpleValue[Name] = Value
+        # Bare numbers become JSON numbers, everything else a JSON string. So
+        # MATLAB arrays and expressions survive as the strings they are.
+        IsNumber[Name] = (!IsQuoted && Value ~ /^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$/)
+    }
+}
+
+{
+    Line = $0
+    gsub(/\r/, "", Line)
+    NrOfParts = SplitStatements(Line, Parts)
+    for (PartNr = 1; PartNr <= NrOfParts; PartNr++)
+        HandleStatement(Parts[PartNr])
+}
+
+END {
+    print "{"
+    for (KeyNr = 1; KeyNr <= NrOfKeys; KeyNr++) {
+        Name = Keys[KeyNr]
+        Comma = (KeyNr < NrOfKeys) ? "," : ""
+        if (Name in IsCell) {
+            Entries = ""
+            for (CellNr = 1; CellNr <= CellSize[Name]; CellNr++)
+                Entries = Entries (CellNr > 1 ? ", " : "") "\"" JsonEscape(CellValue[Name, CellNr]) "\""
+            print "    \"" JsonEscape(Name) "\": [" Entries "]" Comma
+        } else if (IsNumber[Name]) {
+            print "    \"" JsonEscape(Name) "\": " SimpleValue[Name] Comma
+        } else {
+            print "    \"" JsonEscape(Name) "\": \"" JsonEscape(SimpleValue[Name]) "\"" Comma
+        }
+    }
+    print "}"
+}
+' "$Par" >"$ParJson"
+chmod 644 "$ParJson"
