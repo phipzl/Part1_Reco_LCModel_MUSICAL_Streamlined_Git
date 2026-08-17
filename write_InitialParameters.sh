@@ -195,3 +195,107 @@ fi
 if ! [[ ${RunLCModel_CPUCores} = "" ]]; then
 	echo "RunLCModel_CPUCores = ${RunLCModel_CPUCores};" >> $Par
 fi
+
+
+##########################################################
+#### WRITE THE SAME PARAMETERS AS JSON FOR NON-MATLAB ####
+##########################################################
+# InitialParameters.m is MATLAB source, so every reader that is not MATLAB has
+# to implement a MATLAB parser first. Read the file back in and write the same
+# content as JSON next to it, so both files can never disagree.
+
+ParJson="${tmp_dir}/InitialParameters.json"
+awk '
+BEGIN {
+    Quote = sprintf("%c", 39)
+    NrOfKeys = 0
+}
+
+function JsonEscape(Str,   Out, Pos, Char) {
+    Out = ""
+    for (Pos = 1; Pos <= length(Str); Pos++) {
+        Char = substr(Str, Pos, 1)
+        if (Char == "\\")
+            Out = Out "\\\\"
+        else if (Char == "\"")
+            Out = Out "\\\""
+        else
+            Out = Out Char
+    }
+    return Out
+}
+
+{
+    Line = $0
+    gsub(/\r/, "", Line)
+    sub(/^[ \t]+/, "", Line)
+    sub(/[ \t]+$/, "", Line)
+    if (Line == "" || substr(Line, 1, 1) == "%")
+        next
+
+    EqualPos = index(Line, "=")
+    if (EqualPos == 0)
+        next
+    Name = substr(Line, 1, EqualPos - 1)
+    Value = substr(Line, EqualPos + 1)
+    sub(/[ \t]+$/, "", Name)
+    sub(/^[ \t]+/, "", Value)
+    sub(/[ \t]+$/, "", Value)
+    sub(/;$/, "", Value)
+    sub(/[ \t]+$/, "", Value)
+
+    # Cell array entry "Name{Nr} = ...", plain assignment otherwise
+    CellNr = 0
+    BracePos = index(Name, "{")
+    if (BracePos > 0) {
+        CellNr = substr(Name, BracePos + 1, index(Name, "}") - BracePos - 1) + 0
+        Name = substr(Name, 1, BracePos - 1)
+        if (CellNr < 1)
+            next
+    }
+    if (Name !~ /^[A-Za-z_][A-Za-z_0-9]*$/)
+        next
+
+    if (!(Name in Seen)) {
+        Seen[Name] = 1
+        NrOfKeys = NrOfKeys + 1
+        Keys[NrOfKeys] = Name
+    }
+
+    IsQuoted = (length(Value) >= 2 && substr(Value, 1, 1) == Quote && substr(Value, length(Value), 1) == Quote)
+    if (IsQuoted)
+        Value = substr(Value, 2, length(Value) - 2)
+
+    if (CellNr > 0) {
+        IsCell[Name] = 1
+        CellValue[Name, CellNr] = Value
+        if (CellNr > CellSize[Name])
+            CellSize[Name] = CellNr
+    } else {
+        SimpleValue[Name] = Value
+        # Bare numbers become JSON numbers, everything else a JSON string. So
+        # MATLAB arrays and expressions survive as the strings they are.
+        IsNumber[Name] = (!IsQuoted && Value ~ /^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][-+]?[0-9]+)?$/)
+    }
+}
+
+END {
+    print "{"
+    for (KeyNr = 1; KeyNr <= NrOfKeys; KeyNr++) {
+        Name = Keys[KeyNr]
+        Comma = (KeyNr < NrOfKeys) ? "," : ""
+        if (Name in IsCell) {
+            Entries = ""
+            for (CellNr = 1; CellNr <= CellSize[Name]; CellNr++)
+                Entries = Entries (CellNr > 1 ? ", " : "") "\"" JsonEscape(CellValue[Name, CellNr]) "\""
+            print "    \"" JsonEscape(Name) "\": [" Entries "]" Comma
+        } else if (IsNumber[Name]) {
+            print "    \"" JsonEscape(Name) "\": " SimpleValue[Name] Comma
+        } else {
+            print "    \"" JsonEscape(Name) "\": \"" JsonEscape(SimpleValue[Name]) "\"" Comma
+        }
+    }
+    print "}"
+}
+' "$Par" >"$ParJson"
+chmod 755 $ParJson
