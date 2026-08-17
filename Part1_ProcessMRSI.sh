@@ -532,8 +532,20 @@ if [[ $deep_learning_flag -eq 1 ]]; then
     if [[ -n $deep_learning_walinet_model ]]; then
         DeepLearningOptions+=(--walinet_model "$deep_learning_walinet_model")
     fi
-    echo -e "\nRun this command: python ./run_deepmrsi.py $abs_tmp_dir $deep_learning_output_dir ${DeepLearningOptions[*]}"
-    python ./run_deepmrsi.py "$abs_tmp_dir" "$deep_learning_output_dir" "${DeepLearningOptions[@]}"
+    DeepLearningScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    DeepLearningPython=$(command -v python3 || command -v python)
+    if [[ -z $DeepLearningPython ]]; then
+        echo -e "\nERROR: neither python3 nor python was found, cannot run the deep learning quantification."
+        exit 1
+    fi
+    echo -e "\nRun this command: $DeepLearningPython $DeepLearningScriptDir/run_deepmrsi.py $abs_tmp_dir $deep_learning_output_dir ${DeepLearningOptions[*]}"
+    "$DeepLearningPython" "$DeepLearningScriptDir/run_deepmrsi.py" "$abs_tmp_dir" "$deep_learning_output_dir" "${DeepLearningOptions[@]}"
+    DeepLearningStatus=$?
+    if [[ $DeepLearningStatus -ne 0 ]]; then
+        echo -e "\nERROR: run_deepmrsi.py failed with status $DeepLearningStatus."
+        echo "No metabolic maps were written to $deep_learning_output_dir. Stopping here."
+        exit $DeepLearningStatus
+    fi
 elif [[ $dont_compute_LCM_flag -eq 0 ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
