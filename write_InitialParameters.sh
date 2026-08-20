@@ -40,7 +40,7 @@ echo "XPACE_motion_correction_flag = ${XPACE_motion_correction_flag};" >> $Par
 #BOW - for phase & frequency prior knowledge
 echo "priors_flag = ${priors_flag};" >> $Par
 echo "NonCartTraj_flag = ${NonCartTraj_flag};" >> $Par
-echo "DebugAdditionalInput_flag = ${NonCartTraj_flag};" >> $Par
+echo "DebugAdditionalInput_flag = ${DebugAdditionalInput_flag};" >> $Par
 echo "GradientDelay_flag = ${GradientDelay_flag};" >> $Par
 
 
