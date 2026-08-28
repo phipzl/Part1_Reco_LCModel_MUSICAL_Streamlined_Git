@@ -410,7 +410,7 @@ optional:
 -t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If minc file is given instead of folder, it is treated as the magnitude file.
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
--w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
+-w  [\"W1,Path\" Or \"W2,Path\"]  Water reference. Format: DAT or DICOM. The same scan as -c [csi file], but without water suppression. The method prefix is required: W1 uses LCModel 'Do Water Scaling', W2 quantifies the water separately and writes water maps, and W2 additionally needs -W [LCM_ControlFile]. A bare path has no prefix, so water referencing is switched off with a warning.
 -X  [XPACE MOTION LOG]      XPACE MOTION LOG
 
 Flags:

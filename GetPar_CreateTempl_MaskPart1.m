@@ -184,10 +184,14 @@ if(Par.Flags.WaterReference_flag == 1)
         if(~isfield(Par.Paths,'LCM_Control_Water_path'))
             warning('Missing path to Water Referencing Control File, setting Water flag to zero');
             Par.Flags.WaterReference_flag = 0;
+            Par.Settings.WaterReference_method = '0';
         end
     else
-        warning('Not a correct format for water referencing, setting Water flag to zero');
+        warning(['Not a correct format for water referencing, setting Water flag to zero. ' ...
+                 'Expected ''W1,<path>'' or ''W2,<path>'', got ''%s''.'], ...
+                 Par.Settings.WaterReference_MethodAndFile);
         Par.Flags.WaterReference_flag = 0;
+        Par.Settings.WaterReference_method = '0';
     end
 else
     Par.Settings.WaterReference_method = '0';  % This is needed, because many following functions have WaterRefMethod in conditions
