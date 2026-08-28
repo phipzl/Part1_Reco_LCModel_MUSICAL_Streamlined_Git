@@ -57,6 +57,16 @@ run_julia_reconstruction() {
         echo -e "\nThe Julia output cannot be used, julia_write_lcm_files was not found."
         return 1
     fi
+    if [[ $WaterReference_flag -eq 1 ]] && [[ ${WaterReference_MethodAndFile%%,*} != "W1" ]]; then
+        echo -e "\nThe Julia reconstruction supports W1 water referencing only. W2 fits the"
+        echo "    water separately, which needs its own LCModel files written for it."
+        return 1
+    fi
+
+    # Which pass this is has to be read before the run: the water pass creates
+    # WaterReference.mat, so afterwards the two passes look alike.
+    local IsWaterPass=0
+    [[ $WaterReference_flag -eq 1 ]] && [[ ! -f "$out_path/WaterReference.mat" ]] && IsWaterPass=1
 
     local ScriptDir
     ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -65,6 +75,12 @@ run_julia_reconstruction() {
 
     # The LCModel files are written once, after the last average
     if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
+        return 0
+    fi
+    # A W1 water pass reconstructs no metabolites, so it has no spectra to write.
+    # Same condition MRSI_Reconstruction.m applies before its LCM-file block.
+    if [[ $IsWaterPass -eq 1 ]]; then
+        echo -e "\nWater reference pass: coil weights stored, no LCModel files to write."
         return 0
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then
