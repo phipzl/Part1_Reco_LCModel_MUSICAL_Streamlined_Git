@@ -70,12 +70,18 @@ const MATLAB_REF_POINT = 4
 `weights.Data` is the raw conj of the reference, and `WaterReferenceCSI` carries the
 coil-compression count the metabolite pass compares against its own."""
 function write_water_reference(path, dat_file, csi_data, recon_kw)
-    weights = MRSI.coil_combine_weights(dat_file; ref_point_for_combine=MATLAB_REF_POINT, recon_kw...)
+    scan_info = MRSI.read_scan_info(dat_file)
+    # MRSI_Reconstruction.m picks the method by channel count: MUSICAL at `:963`,
+    # and the phase-only "Phase VC" branch at `:968` for a single channel. Deriving
+    # with the wrong one gives weights that are simply different, not slightly off.
+    combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
+    weights = MRSI.coil_combine_weights(dat_file; ref_point_for_combine=MATLAB_REF_POINT,
+                                        combine_method, recon_kw...)
     if isnothing(weights)
         @warn "The water reference has no PATREFSCAN, so it cannot supply coil weights"
         return
     end
-    scan_info = MRSI.read_scan_info(dat_file)
+    println("Julia: coil weights from FID point $MATLAB_REF_POINT, method $combine_method")
     println("Julia: writing $path")
     matwrite(path, Dict(
         "weights" => Dict("Data" => weights),
@@ -84,13 +90,17 @@ function write_water_reference(path, dat_file, csi_data, recon_kw)
             "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]))))
 end
 
-"""`weights.Data` from a WaterReference.mat, whichever pipeline wrote it, or `nothing`."""
+"""`weights.Data` from a WaterReference.mat, whichever pipeline wrote it, or `nothing`.
+
+MATLAB drops trailing singleton dimensions when it saves, so a single-channel file
+comes back as (x, y, z) rather than the (x, y, z, 1, cha) the combination indexes."""
 function stored_coil_weights(path)
     isfile(path) || return nothing
     stored = matread(path)
     weights = get(stored, "weights", nothing)
     weights isa AbstractDict && haskey(weights, "Data") || return nothing
-    return weights["Data"]
+    w = weights["Data"]
+    return ndims(w) == 5 ? w : reshape(w, size(w, 1), size(w, 2), size(w, 3), 1, :)
 end
 
 """Read a file written by write_complex_raw back into an array of size sz."""
