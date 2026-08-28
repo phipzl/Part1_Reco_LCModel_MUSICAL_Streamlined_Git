@@ -96,6 +96,9 @@ run_mrsi_reconstruction() {
         if run_julia_reconstruction "$1"; then
             return 0
         fi
+        # MRSI_Reconstruction adds an existing CombinedCSI.mat as a previous average,
+        # so a Julia pass that did not finish must not be left behind for it.
+        rm -f "$out_path/CombinedCSI.mat"
         echo -e "Use the MATLAB reconstruction instead.\n"
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then

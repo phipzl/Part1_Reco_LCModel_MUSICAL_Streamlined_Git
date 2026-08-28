@@ -14,6 +14,8 @@
 # Written to out_path:
 #   julia_csi.raw        accumulated complex float32, interleaved Re/Im, [Nx,Ny,Nz,Nt]
 #   julia_csi_watref.raw same layout, water reference only
+#   CombinedCSI.mat      csi.Data, the array MRSI_Reconstruction stores under the same
+#                        name, read by julia_write_lcm_files on the MATLAB side
 # Written to tmp_dir:
 #   julia_recoinfo.m     CSI dimensions, read by julia_write_lcm_files on the MATLAB side
 
@@ -24,6 +26,7 @@ if get(ENV, "JULIA_MRSI_PKG", "") != ""
     Pkg.activate(ENV["JULIA_MRSI_PKG"]; io=devnull)
 end
 using JSON
+using MAT
 using MRSI
 
 """Parse a gradient delay string like "[12.56, 12.54, 10.08]" into complex microseconds.
@@ -182,6 +185,10 @@ if !is_water_ref && (n_files <= 1 || cur_avg == n_files)
     Nx, Ny = sz[1], sz[2]
     Nz = length(sz) >= 4 ? sz[3] : 1
     Nt = sz[end]
+    combined_path = joinpath(out_path, "CombinedCSI.mat")
+    println("Julia: writing $combined_path")
+    matwrite(combined_path, Dict("csi" => Dict("Data" => csi_data)))
+
     recoinfo_path = joinpath(tmp_dir, "julia_recoinfo.m")
     println("Julia: writing $recoinfo_path")
     open(recoinfo_path, "w") do f
