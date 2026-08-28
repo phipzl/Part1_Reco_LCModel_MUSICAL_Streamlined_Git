@@ -931,7 +931,11 @@ function Info = ReadMeasurementInfoFromMRSI(Par)
             'Unknown'];    
     else
         mapVBVDHdr = read_twix_hdr_standalone(Par.Paths.csi_path{1});
-        mapVBVDHdr = mapVBVDHdr{end};
+        if(iscell(mapVBVDHdr))
+            % Multi-raid file: one header per measurement, the last is the scan.
+            % A file holding a single measurement is returned as a struct.
+            mapVBVDHdr = mapVBVDHdr{end};
+        end
         Info=[mapVBVDHdr.Dicom.tPatientName, ' ', ...
             num2str(mapVBVDHdr.Config.PatientBirthDay), ' ', ...
             num2str(mapVBVDHdr.Dicom.flPatientAge), ' ', ...
