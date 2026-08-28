@@ -417,7 +417,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given.
+-Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given. With [fitting] \"off\" the deep fitting is skipped and only the WALINET removal runs, on the reconstructed FIDs, and LCModel then fits the cleaned spectra as usual.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -523,7 +523,14 @@ done
 #7.
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 echo -e "\n\n7. Start LCModel Processing\n\n"
-if [[ $deep_learning_flag -eq 1 ]]; then
+# "-Q off <model>" means WALINET without the deep fitting: the removal already ran
+# before the LCModel files were written, so this step has nothing to do and the
+# LCModel branch below takes over.
+if [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting == "off" ]]; then
+    echo -e "
+WALINET removal only, LCModel fits the cleaned spectra."
+fi
+if [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting != "off" ]]; then
     mkdir -p "$deep_learning_output_dir"
     DeepLearningOptions=()
     if [[ -n $deep_learning_fitting ]]; then

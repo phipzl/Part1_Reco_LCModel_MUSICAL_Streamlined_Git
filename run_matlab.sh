@@ -34,6 +34,14 @@ julia_lcm_writer_available() {
     [[ -n $(find -L "$MatlabFunctionsFolder" -name julia_write_lcm_files.m -print -quit 2>/dev/null) ]]
 }
 
+# WALINET removal followed by LCModel instead of the deepmrsi fitters. "-Q off
+# <model>" asks for the removal without the deep fitting, so the cleaned spectra
+# reach LCModel through the ordinary path.
+walinet_before_lcmodel() {
+    [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting == "off" ]] \
+        && [[ -n $deep_learning_walinet_model ]] && [[ $deep_learning_walinet_model != "off" ]]
+}
+
 # Argument $1: CurAv argument for run_julia_reco.jl
 # Returns non-zero if nothing was reconstructed, so the caller can use MATLAB instead.
 run_julia_reconstruction() {
@@ -77,6 +85,17 @@ run_julia_reconstruction() {
     if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
         return 0
     fi
+    if walinet_before_lcmodel; then
+        local WalinetPython
+        WalinetPython=$(command -v python3 || command -v python)
+        if [[ -z $WalinetPython ]]; then
+            echo -e "\nNeither python3 nor python was found, cannot run the WALINET removal."
+            return 1
+        fi
+        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $deep_learning_walinet_model"
+        "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$deep_learning_walinet_model" || return 1
+    fi
+
     # A W1 water pass reconstructs no metabolites, so it has no spectra to write.
     # Same condition MRSI_Reconstruction.m applies before its LCM-file block.
     if [[ $IsWaterPass -eq 1 ]]; then
