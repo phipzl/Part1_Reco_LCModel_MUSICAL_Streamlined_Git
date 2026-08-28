@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# Stop the whole pipeline when a MATLAB step fails, so the exit code reports it.
+# Argument $1: name of the step that failed.
+matlab_step_failed() {
+    echo -e "\n\n$1 failed, stopping.\n\n"
+    # run_matlab.sh is also sourced by scripts that have no TerminateProgram.
+    if declare -f TerminateProgram >/dev/null; then
+        TerminateProgram "$DebugFlag" 1
+    fi
+    exit 1
+}
+
+# An uncaught error aborts the -r statement list before "exit" runs, and MATLAB
+# then reads EOF on stdin and quits 0. The try/catch is what makes the status real.
 # Argument $1: name of matlab script
 run_matlab() {
     if [[ $compiled_matlab_flag -eq 1 ]]; then
@@ -8,14 +21,14 @@ run_matlab() {
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        "$MatlabCompiledFunctions/$1" "$abs_tmp_dir"
+        "$MatlabCompiledFunctions/$1" "$abs_tmp_dir" || matlab_step_failed "$1"
     else
         # run the matlab script $1
         echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); $1('$abs_tmp_dir')\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        $matlabp -nodisplay -r "addpath(genpath('$MatlabFunctionsFolder')); $1('$abs_tmp_dir'); exit"
+        $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); $1('$abs_tmp_dir'); catch ME; disp(getReport(ME)); exit(1); end; exit(0)" || matlab_step_failed "$1"
     fi
 }
 
@@ -86,7 +99,7 @@ run_julia_reconstruction() {
         "$MatlabCompiledFunctions/julia_write_lcm_files" "$abs_tmp_dir"
     else
         echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir')\""
-        $matlabp -nodisplay -r "addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir'); exit"
+        $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir'); catch ME; disp(getReport(ME)); exit(1); end; exit(0)"
     fi
 }
 
@@ -104,13 +117,13 @@ run_mrsi_reconstruction() {
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1"
+        "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1" || matlab_step_failed MRSI_Reconstruction
     else
         # run the matlab script $1
         echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        $matlabp -nodisplay -r "addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1); exit"
+        $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1); catch ME; disp(getReport(ME)); exit(1); end; exit(0)" || matlab_step_failed MRSI_Reconstruction
     fi
 }

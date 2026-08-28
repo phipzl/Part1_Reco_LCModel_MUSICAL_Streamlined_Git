@@ -69,7 +69,7 @@ TerminateProgram() {
     echo -e "\n\n\n\t\tE N D\n\n\n"
 
     if [[ "$Trapped" == "0" ]]; then
-        exit 0
+        exit "${2:-0}"
     fi
 }
 
@@ -468,9 +468,11 @@ fi
 run_matlab GetPar_CreateTempl_MaskPart1 0
 
 # Terminate if there was an error
-bash "$tmp_dir/ErrorFile.sh"
+# shellcheck source=/dev/null
+source "$tmp_dir/ErrorFile.sh"   # sets ErrorInGetPar_CreateTempl; bash would lose it to a subshell
 if [[ $ErrorInGetPar_CreateTempl -eq 1 ]]; then
-    TerminateProgram $DebugFlag
+    echo -e "\n\nGetPar_CreateTempl_MaskPart1 reported: $ErrorMessage\n\n"
+    TerminateProgram $DebugFlag 1
 fi
 
 # read -rp "stop before create minc template"
