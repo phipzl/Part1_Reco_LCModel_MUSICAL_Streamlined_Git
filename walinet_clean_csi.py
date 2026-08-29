@@ -20,8 +20,8 @@ import os
 import shutil
 import sys
 
+import h5py
 import numpy as np
-import scipy.io as sio
 
 
 def main(tmp_dir, model):
@@ -56,18 +56,38 @@ def read_out_path(tmp_dir):
 
 
 def load_csi(path):
-    """csi.Data as (x, y, z, t), the layout run_julia_reco.jl writes."""
-    mat = sio.loadmat(path, struct_as_record=False, squeeze_me=True)
-    if "csi" not in mat:
-        sys.exit(f"ERROR: {path} has no csi variable.")
-    data = np.asarray(mat["csi"].Data)
-    if not np.iscomplexobj(data):
-        sys.exit(f"ERROR: csi.Data in {path} is {data.dtype}, expected complex.")
-    return data
+    """csi.Data as (x, y, z, t).
+
+    Both pipelines write MAT v7.3, which is HDF5 and which scipy cannot read at
+    all. h5py can, but stores the dimensions in the opposite order and complex
+    numbers as a real/imag compound, so both are undone here.
+    """
+    with h5py.File(path, "r") as f:
+        if "csi/Data" not in f:
+            sys.exit(f"ERROR: {path} has no csi/Data.")
+        raw = f["csi/Data"][()]
+    if raw.dtype.names != ("real", "imag"):
+        sys.exit(f"ERROR: csi/Data in {path} is {raw.dtype}, expected complex.")
+    data = (raw["real"] + 1j * raw["imag"]).astype(np.complex64)
+    return data.transpose(range(data.ndim)[::-1])
 
 
 def save_csi(path, data):
-    sio.savemat(path, {"csi": {"Data": data}}, do_compression=True)
+    """Write the cleaned FIDs back into the same dataset.
+
+    In place, so every MATLAB attribute and everything else in the file survives
+    untouched. Only the values change, and the shape has to match what was read.
+    """
+    packed = np.empty(data.transpose(range(data.ndim)[::-1]).shape,
+                      dtype=[("real", "<f4"), ("imag", "<f4")])
+    flipped = data.transpose(range(data.ndim)[::-1])
+    packed["real"] = flipped.real
+    packed["imag"] = flipped.imag
+    with h5py.File(path, "r+") as f:
+        dset = f["csi/Data"]
+        if dset.shape != packed.shape:
+            sys.exit(f"ERROR: cleaned data is {packed.shape}, the file holds {dset.shape}.")
+        dset[...] = packed
 
 
 def load_mask(tmp_dir, shape):

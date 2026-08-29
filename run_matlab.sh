@@ -93,7 +93,14 @@ run_julia_reconstruction() {
             return 1
         fi
         echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $deep_learning_walinet_model"
-        "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$deep_learning_walinet_model" || return 1
+        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$deep_learning_walinet_model"; then
+            # Deliberately not "return 1". That falls back to the MATLAB
+            # reconstruction, which would fit uncleaned spectra and report success
+            # for a run that asked for the removal.
+            echo -e "\nwalinet_clean_csi.py failed, stopping."
+            declare -f matlab_step_failed >/dev/null && matlab_step_failed walinet_clean_csi.py
+            exit 1
+        fi
     fi
 
     # A W1 water pass reconstructs no metabolites, so it has no spectra to write.
