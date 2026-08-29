@@ -115,7 +115,9 @@ def run_walinet(csi, mask, model):
     print(f"walinet_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
 
     clean = rw.remove_water_and_lipids(csi, mask)
-    if not np.all(np.isfinite(clean.view(np.float32))):
+    # isfinite on the complex array directly: .view(np.float32) needs a
+    # contiguous last axis and raises on anything WALINET returns as a view.
+    if not np.all(np.isfinite(clean)):
         sys.exit("ERROR: WALINET returned non-finite values.")
     if np.allclose(clean[mask], csi[mask], rtol=1e-4, atol=1e-4):
         sys.exit("ERROR: WALINET left the masked voxels unchanged, inference did not run.")
