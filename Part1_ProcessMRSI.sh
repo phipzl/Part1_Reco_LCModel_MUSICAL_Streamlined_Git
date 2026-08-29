@@ -503,6 +503,21 @@ if [[ $priors_flag -eq 1 ]]; then
     done
 fi
 
+# WALINET can be reached two ways and they do the same thing: -L runs it on the
+# reconstruction, and -Q's second argument runs it inside deepmrsi before the deep
+# fitting. Asking for both removes water and lipids twice, which no error would
+# report because twice-cleaned spectra still look like spectra.
+if [[ $LipidDecon_flag -eq 1 ]] && [[ ${LipidDecon_MethodAndNoOfLoops%%,*} =~ ^([Ww][Aa][Ll][Ii][Nn][Ee][Tt])$ ]]    && [[ $deep_learning_flag -eq 1 ]] && [[ -n $deep_learning_walinet_model ]]    && [[ $deep_learning_walinet_model != "off" ]]; then
+    echo -e "
+WALINET is requested twice: once as the lipid decontamination (-L) and once"
+    echo "    inside the deep quantification (-Q $deep_learning_fitting $deep_learning_walinet_model)."
+    echo "    Water and lipids would be removed twice. Use -L for WALINET followed by LCModel,"
+    echo "    or -Q for WALINET followed by the deep fitting, and pass \"off\" as -Q's model"
+    echo "    if you want the deep fitting without a second removal."
+    TerminateProgram $DebugFlag 1
+    exit 1
+fi
+
 # 6.
 ###########   Process Data, Prepare LCModel Fitting   ############
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
