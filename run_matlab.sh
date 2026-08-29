@@ -34,12 +34,19 @@ julia_lcm_writer_available() {
     [[ -n $(find -L "$MatlabFunctionsFolder" -name julia_write_lcm_files.m -print -quit 2>/dev/null) ]]
 }
 
-# WALINET removal followed by LCModel instead of the deepmrsi fitters. "-Q off
-# <model>" asks for the removal without the deep fitting, so the cleaned spectra
-# reach LCModel through the ordinary path.
-walinet_before_lcmodel() {
-    [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting == "off" ]] \
-        && [[ -n $deep_learning_walinet_model ]] && [[ $deep_learning_walinet_model != "off" ]]
+# WALINET is a lipid decontamination method, an alternative to the L1 and L2
+# regularization rather than a step of its own: -L "WALINET,<model>". The model is
+# optional; without it WALINET uses its configured default.
+walinet_is_the_lipid_decon() {
+    [[ $LipidDecon_flag -eq 1 ]] || return 1
+    local Method=${LipidDecon_MethodAndNoOfLoops%%,*}
+    [[ ${Method^^} == "WALINET" ]]
+}
+
+walinet_lipid_decon_model() {
+    local Rest=${LipidDecon_MethodAndNoOfLoops#*,}
+    [[ $Rest == "$LipidDecon_MethodAndNoOfLoops" ]] && Rest=""
+    echo "$Rest"
 }
 
 # Argument $1: CurAv argument for run_julia_reco.jl
@@ -85,15 +92,16 @@ run_julia_reconstruction() {
     if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
         return 0
     fi
-    if walinet_before_lcmodel; then
-        local WalinetPython
+    if walinet_is_the_lipid_decon; then
+        local WalinetPython WalinetModel
         WalinetPython=$(command -v python3 || command -v python)
+        WalinetModel=$(walinet_lipid_decon_model)
         if [[ -z $WalinetPython ]]; then
-            echo -e "\nNeither python3 nor python was found, cannot run the WALINET removal."
+            echo -e "\nNeither python3 nor python was found, cannot run the WALINET lipid decontamination."
             return 1
         fi
-        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $deep_learning_walinet_model"
-        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$deep_learning_walinet_model"; then
+        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $WalinetModel"
+        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel"; then
             # Deliberately not "return 1". That falls back to the MATLAB
             # reconstruction, which would fit uncleaned spectra and report success
             # for a run that asked for the removal.
@@ -128,6 +136,13 @@ run_mrsi_reconstruction() {
         # so a Julia pass that did not finish must not be left behind for it.
         rm -f "$out_path/CombinedCSI.mat"
         echo -e "Use the MATLAB reconstruction instead.\n"
+    fi
+    # WALINET decontaminates the Julia output; the MATLAB reconstruction has no
+    # equivalent, so reconstructing without it would drop the requested step.
+    if walinet_is_the_lipid_decon; then
+        echo -e "\nWALINET lipid decontamination is implemented for the Julia reconstruction (-S) only."
+        declare -f matlab_step_failed >/dev/null && matlab_step_failed "WALINET lipid decontamination"
+        exit 1
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then
         # run the compiled matlab function

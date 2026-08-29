@@ -398,7 +398,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -417,7 +417,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given. With [fitting] \"off\" the deep fitting is skipped and only the WALINET removal runs, on the reconstructed FIDs, and LCModel then fits the cleaned spectra as usual.
+-Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -523,14 +523,7 @@ done
 #7.
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 echo -e "\n\n7. Start LCModel Processing\n\n"
-# "-Q off <model>" means WALINET without the deep fitting: the removal already ran
-# before the LCModel files were written, so this step has nothing to do and the
-# LCModel branch below takes over.
-if [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting == "off" ]]; then
-    echo -e "
-WALINET removal only, LCModel fits the cleaned spectra."
-fi
-if [[ $deep_learning_flag -eq 1 ]] && [[ $deep_learning_fitting != "off" ]]; then
+if [[ $deep_learning_flag -eq 1 ]]; then
     mkdir -p "$deep_learning_output_dir"
     DeepLearningOptions=()
     if [[ -n $deep_learning_fitting ]]; then

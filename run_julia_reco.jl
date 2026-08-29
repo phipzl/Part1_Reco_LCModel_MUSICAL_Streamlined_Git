@@ -158,7 +158,9 @@ zero_fill_flag = get(p, "ZeroFillMetMaps_flag", 0) == 1
 lipid_decon = nothing
 if get(p, "LipidDecon_flag", 0) == 1
     method = uppercase(split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')[1])
-    lipid_decon = method == "L1" ? :L1 : :L2
+    # WALINET is the alternative to the regularization, not an addition to it. It
+    # runs after the reconstruction, in walinet_clean_csi.py, so nothing happens here.
+    lipid_decon = method == "WALINET" ? nothing : method == "L1" ? :L1 : :L2
 end
 
 gradient_delay_us = [12.42 + 10.27im, 12.38 + 10.75im, 10.14 + 8.99im]  # MRSI.jl defaults
