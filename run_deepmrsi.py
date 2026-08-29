@@ -22,7 +22,15 @@ parser.add_argument("tmp_dir", help="temporary directory of the current run")
 parser.add_argument("output_dir", help="directory the metabolic maps are written to")
 parser.add_argument("--fitting", choices=("dlfit", "gpufit", "off"), default=None,
                     help="fitting backend, deepmrsi decides if it is not given")
-parser.add_argument("--walinet_model", choices=("legacy_7T", "final_7T", "final_3T", "off"), default=None,
+# The names come from walinet itself rather than a copy here, which is how this
+# list fell behind: it still offered legacy_7T/final_7T/final_3T after they were
+# renamed, so the 7T and 3T that Part1's own usage text documents were rejected.
+try:
+    from walinet.package_config import MODEL_CHOICES as WALINET_MODEL_CHOICES
+except ImportError:
+    WALINET_MODEL_CHOICES = None
+
+parser.add_argument("--walinet_model", choices=WALINET_MODEL_CHOICES, default=None,
                     help="WALINET model for the lipid suppression, deepmrsi decides if it is not given")
 args = parser.parse_args()
 

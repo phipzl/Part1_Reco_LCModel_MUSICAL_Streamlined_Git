@@ -398,7 +398,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -503,6 +503,21 @@ if [[ $priors_flag -eq 1 ]]; then
             minctoraw "$priors_path/$CurFile.mnc" -nonormalize -float >"$priors_path/$CurFile.raw"
         fi
     done
+fi
+
+# WALINET can be reached two ways and they do the same thing: -L runs it on the
+# reconstruction, and -Q's second argument runs it inside deepmrsi before the deep
+# fitting. Asking for both removes water and lipids twice, which no error would
+# report because twice-cleaned spectra still look like spectra.
+if [[ $LipidDecon_flag -eq 1 ]] && [[ ${LipidDecon_MethodAndNoOfLoops%%,*} =~ ^([Ww][Aa][Ll][Ii][Nn][Ee][Tt])$ ]]    && [[ $deep_learning_flag -eq 1 ]] && [[ -n $deep_learning_walinet_model ]]    && [[ $deep_learning_walinet_model != "off" ]]; then
+    echo -e "
+WALINET is requested twice: once as the lipid decontamination (-L) and once"
+    echo "    inside the deep quantification (-Q $deep_learning_fitting $deep_learning_walinet_model)."
+    echo "    Water and lipids would be removed twice. Use -L for WALINET followed by LCModel,"
+    echo "    or -Q for WALINET followed by the deep fitting, and pass \"off\" as -Q's model"
+    echo "    if you want the deep fitting without a second removal."
+    TerminateProgram $DebugFlag 1
+    exit 1
 fi
 
 # 6.
