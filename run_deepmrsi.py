@@ -5,9 +5,15 @@ run_deepmrsi.py: bridge between the MRSI pipeline and the deepmrsi quantificatio
 Called from step 7 of Part1_ProcessMRSI.sh when the -Q flag is set:
     python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walinet_model Y]
 
-Reads the NIfTI files that the reconstruction wrote to <out_path>/deepmrsi_inputs/,
-calls process_deep_mrsi_offline() of the deep_crt_mrsi package and writes the
-metabolite maps as NIfTI to <output_dir>.
+Takes its input from whichever the reconstruction left behind:
+
+  <out_path>/deepmrsi_inputs/   NIfTI files, when a reconstruction writes them
+  <out_path>/CombinedCSI.mat    otherwise, read through deep_crt_mrsi.combined_csi
+
+then calls process_deep_mrsi_offline() and writes the metabolite maps as NIfTI to
+<output_dir>. Nothing in Part1 currently writes deepmrsi_inputs/, so in practice
+the second is the path taken; the first is kept because it is the richer input
+(it can carry a separate prescan) and costs nothing to keep.
 """
 
 import argparse
@@ -63,37 +69,47 @@ def find_inputs_dir(tmp_dir):
     )
 
 
-inputs_dir = find_inputs_dir(tmp_dir)
-print(f"run_deepmrsi: reading the inputs from {inputs_dir}")
+try:
+    inputs_dir = find_inputs_dir(tmp_dir)
+except FileNotFoundError as missing_inputs:
+    inputs_dir = None
+    print(f"run_deepmrsi: no deepmrsi_inputs directory ({missing_inputs})")
+else:
+    print(f"run_deepmrsi: reading the inputs from {inputs_dir}")
 
-meta_path = os.path.join(inputs_dir, "deepmrsi_metadata.json")
-if not os.path.isfile(meta_path):
-    print(f"ERROR: deepmrsi_metadata.json not found in {inputs_dir}", file=sys.stderr)
-    sys.exit(1)
+def find_combined_csi(tmp_dir):
+    """The reconstruction's CombinedCSI.mat, which carries the same data."""
+    par_file = os.path.join(tmp_dir, "InitialParameters.json")
+    if os.path.isfile(par_file):
+        with open(par_file) as f:
+            out_path = json.load(f).get("out_path", "")
+        if out_path:
+            candidate = os.path.join(out_path, "CombinedCSI.mat")
+            if os.path.isfile(candidate):
+                return candidate
+    for candidate in (os.path.join(tmp_dir, "CombinedCSI.mat"),
+                      os.path.join(os.path.dirname(tmp_dir), "CombinedCSI.mat")):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
-with open(meta_path) as f:
-    meta = json.load(f)
 
-info = {
-    "dwelltime": meta["dwelltime"],                # ms
-    "larmor_frequency": meta["larmor_frequency"],  # Hz
-    "inplane_res": meta["inplane_res"],            # mm
-    "fov_slice": meta["fov_slice"],                # mm
-}
-# Optional settings that deepmrsi understands, only passed on if they are there
-for key in ("bet_f", "bet_g", "walinet", "walinet_model", "fitting",
-            "lipidSuppression_beta", "use_prescan_for_masking",
-            "writeWithoutSuppression", "makehomogeneous_sigma"):
-    if key in meta:
-        info[key] = meta[key]
-
-# The command line wins over the metadata. If neither sets them, deepmrsi keeps
-# its own defaults.
-if args.fitting is not None:
-    info["fitting"] = args.fitting
-if args.walinet_model is not None:
-    info["walinet_model"] = args.walinet_model
-
+meta = {}
+if inputs_dir is not None:
+    meta_path = os.path.join(inputs_dir, "deepmrsi_metadata.json")
+    if not os.path.isfile(meta_path):
+        print(f"ERROR: deepmrsi_metadata.json not found in {inputs_dir}", file=sys.stderr)
+        sys.exit(1)
+    with open(meta_path) as f:
+        meta = json.load(f)
+    info = {
+        "dwelltime": meta["dwelltime"],                # ms
+        "larmor_frequency": meta["larmor_frequency"],  # Hz
+        "inplane_res": meta["inplane_res"],            # mm
+        "fov_slice": meta["fov_slice"],                # mm
+    }
+else:
+    info = None  # filled from CombinedCSI.mat below, together with the arrays
 try:
     import nibabel as nib
 except ImportError:
@@ -117,27 +133,57 @@ def load_nifti_complex(path):
     return data.astype(np.complex64)
 
 
-csi_path = os.path.join(inputs_dir, "csi.nii.gz")
-if not os.path.isfile(csi_path):
-    print(f"ERROR: csi.nii.gz not found in {inputs_dir}", file=sys.stderr)
-    sys.exit(1)
-fid = load_nifti_complex(csi_path)
-print(f"run_deepmrsi: fid shape = {fid.shape}")
+def require(path, what):
+    if not os.path.isfile(path):
+        print(f"ERROR: {what} not found at {path}", file=sys.stderr)
+        sys.exit(1)
+    return path
 
-musical_path = os.path.join(inputs_dir, "musical.nii.gz")
-if not os.path.isfile(musical_path):
-    print(f"ERROR: musical.nii.gz not found in {inputs_dir}", file=sys.stderr)
-    sys.exit(1)
-patref = load_nifti_complex(musical_path)
-print(f"run_deepmrsi: patref shape = {patref.shape}")
 
 prescan = None
-prescan_path = os.path.join(inputs_dir, "prescan.nii.gz")
-if os.path.isfile(prescan_path):
-    prescan = load_nifti_complex(prescan_path)
-    print(f"run_deepmrsi: prescan shape = {prescan.shape}")
+if inputs_dir is not None:
+    fid = load_nifti_complex(require(os.path.join(inputs_dir, "csi.nii.gz"), "csi.nii.gz"))
+    patref = load_nifti_complex(require(os.path.join(inputs_dir, "musical.nii.gz"), "musical.nii.gz"))
+    prescan_path = os.path.join(inputs_dir, "prescan.nii.gz")
+    if os.path.isfile(prescan_path):
+        prescan = load_nifti_complex(prescan_path)
+        print(f"run_deepmrsi: prescan shape = {prescan.shape}")
+    else:
+        print("run_deepmrsi: no prescan.nii.gz, deepmrsi masks on the patref instead")
 else:
-    print("run_deepmrsi: no prescan.nii.gz, deepmrsi masks on the patref instead")
+    # deep_crt_mrsi already knows how to read a CombinedCSI.mat: it takes the
+    # combined spectra from csi.Data, the uncombined water reference from
+    # image_FullFID.Data and the acquisition parameters from csi.RecoPar. There
+    # is no prescan in that file, so masking falls back to the patref.
+    from deep_crt_mrsi.combined_csi import load_combined_csi
+
+    combined = find_combined_csi(tmp_dir)
+    if combined is None:
+        print(
+            "ERROR: neither a deepmrsi_inputs directory nor a CombinedCSI.mat "
+            "was found. The reconstruction has to leave one of them behind.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"run_deepmrsi: reading the inputs from {combined}")
+    fid, patref, info = load_combined_csi(combined)
+
+print(f"run_deepmrsi: fid shape = {fid.shape}")
+print(f"run_deepmrsi: patref shape = {patref.shape}")
+
+# Optional settings that deepmrsi understands, only passed on if they are there
+for key in ("bet_f", "bet_g", "walinet", "walinet_model", "fitting",
+            "lipidSuppression_beta", "use_prescan_for_masking",
+            "writeWithoutSuppression", "makehomogeneous_sigma"):
+    if key in meta:
+        info[key] = meta[key]
+
+# The command line wins over the metadata. If neither sets them, deepmrsi keeps
+# its own defaults.
+if args.fitting is not None:
+    info["fitting"] = args.fitting
+if args.walinet_model is not None:
+    info["walinet_model"] = args.walinet_model
 
 os.makedirs(output_dir, exist_ok=True)
 

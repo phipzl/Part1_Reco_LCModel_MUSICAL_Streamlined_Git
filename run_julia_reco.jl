@@ -90,6 +90,48 @@ function write_water_reference(path, dat_file, csi_data, recon_kw)
             "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]))))
 end
 
+"""What deep_crt_mrsi.combined_csi reads out of a CombinedCSI.mat.
+
+It wants three things: the combined spectra as `csi.Data`, the UNCOMBINED water
+reference as `image_FullFID.Data`, and the acquisition parameters under
+`csi.RecoPar`. Writing only the spectra leaves the deep fitting unable to run at
+all, which is why the field names here are its names and not ours."""
+function combined_csi_contents(csi_data, dat_file, recon_kw)
+    contents = Dict{String,Any}("csi" => Dict{String,Any}("Data" => csi_data))
+    scan_info = MRSI.read_scan_info(dat_file)
+    online = scan_info[:ONLINE]
+
+    contents["csi"]["RecoPar"] = Dict{String,Any}(
+        "Dwelltimes" => float(online[:dwelltime]),            # ns, as combined_csi expects
+        "LarmorFreq" => float(online[:larmor_frequency]),
+        "FoV_Read" => float(online[:fov_readout]),
+        "FoV_Partition" => float(online[:fov_slice]),
+        "nFreqEnc_FinalMatrix" => float(size(csi_data, 1)),   # after reconstruction, not the encoded size
+    )
+
+    patref = uncombined_patref(scan_info, recon_kw)
+    if isnothing(patref)
+        @warn "No PATREFSCAN, so CombinedCSI.mat carries no image_FullFID and the deep fitting cannot read it"
+    else
+        contents["image_FullFID"] = Dict{String,Any}("Data" => patref)
+    end
+    return contents
+end
+
+"""The water reference with its channels intact, as (x, y, z, t, cha).
+
+The deep fitting does its own coil combination, so it needs the uncombined
+reference; a combined one would be silently accepted as single-channel."""
+function uncombined_patref(scan_info, recon_kw)
+    haskey(scan_info, :PATREFSCAN) || return nothing
+    reco = MRSI.reconstruct_uncombined(scan_info; scans=[:PATREFSCAN], recon_kw...)
+    patref = get(reco, :PATREFSCAN, nothing)
+    isnothing(patref) && return nothing
+    patref = patref isa AbstractVector ? first(patref) : patref
+    data = Array{ComplexF32}(patref)
+    return ndims(data) == 5 ? data : reshape(data, size(data, 1), size(data, 2), size(data, 3), size(data, 4), :)
+end
+
 """`weights.Data` from a WaterReference.mat, whichever pipeline wrote it, or `nothing`.
 
 MATLAB drops trailing singleton dimensions when it saves, so a single-channel file
@@ -246,7 +288,7 @@ if !is_water_ref && (n_files <= 1 || cur_avg == n_files)
     Nt = sz[end]
     combined_path = joinpath(out_path, "CombinedCSI.mat")
     println("Julia: writing $combined_path")
-    matwrite(combined_path, Dict("csi" => Dict("Data" => csi_data)))
+    matwrite(combined_path, combined_csi_contents(csi_data, dat_file, recon_kw))
 
     recoinfo_path = joinpath(tmp_dir, "julia_recoinfo.m")
     println("Julia: writing $recoinfo_path")
