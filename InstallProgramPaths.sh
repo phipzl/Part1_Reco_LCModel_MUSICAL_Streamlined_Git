@@ -61,5 +61,8 @@ export JULIA_DEEPMRSI_PKG="${JULIA_DEEPMRSI_PKG:-}"
 # MATLAB Runtime (runs compiled MATLAB code without license)
 MATLAB_RUNTIME_ROOT="${MATLAB_RUNTIME_ROOT:-/opt/MATLAB_Runtime_R2021b/v911}"
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${MATLAB_RUNTIME_ROOT}/runtime/glnxa64:${MATLAB_RUNTIME_ROOT}/bin/glnxa64:${MATLAB_RUNTIME_ROOT}/sys/os/glnxa64:${MATLAB_RUNTIME_ROOT}/sys/opengl/lib/glnxa64
-export MatlabCompiledFunctions="Matlab_Compiled"
+# Relative, so it only resolves while the working directory happens to be the
+# checkout. A deployment that runs the compiled binaries from anywhere else
+# needs an absolute path, so the environment decides as it does for matlabp.
+export MatlabCompiledFunctions="${MatlabCompiledFunctions:-Matlab_Compiled}"
 
