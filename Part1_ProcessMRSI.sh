@@ -172,7 +172,11 @@ export julia_reconstruction=0
 export deep_learning_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
-export compiled_matlab_flag=0
+# A deployment with the MATLAB Runtime and no MATLAB can only take the compiled
+# route, and without this it would need -K on every call and otherwise die on
+# whatever matlabp points at. Same form as the paths in InstallProgramPaths.sh:
+# the environment decides, the Vienna default stands when it says nothing.
+export compiled_matlab_flag="${compiled_matlab_flag:-0}"
 #BOW
 export priors_flag=0
 export DebugAdditionalInput_flag=0
