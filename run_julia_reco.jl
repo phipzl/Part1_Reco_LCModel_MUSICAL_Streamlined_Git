@@ -156,11 +156,27 @@ noisedecor_flag = get(p, "noisedecorrelation_flag", 0) == 1
 zero_fill_flag = get(p, "ZeroFillMetMaps_flag", 0) == 1
 
 lipid_decon = nothing
+lipid_decon_kw = NamedTuple()
 if get(p, "LipidDecon_flag", 0) == 1
-    method = uppercase(split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')[1])
+    spec = split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')
+    method = uppercase(spec[1])
+    value = length(spec) > 1 ? tryparse(Float64, spec[2]) : nothing
     # WALINET is the alternative to the regularization, not an addition to it. It
     # runs after the reconstruction, in walinet_clean_csi.py, so nothing happens here.
     lipid_decon = method == "WALINET" ? nothing : method == "L1" ? :L1 : :L2
+
+    if lipid_decon == :L1 && !isnothing(value)
+        # An iteration count means the same thing on both sides.
+        lipid_decon_kw = (; L1_n_loops = round(Int, value))
+    elseif lipid_decon == :L2 && !isnothing(value)
+        # It does not follow for L2. MATLAB takes LipidDecon_L2BetaCorrFactor, a
+        # multiplier on a beta it computes, default 1; MRSI.jl takes L2_beta, an
+        # absolute strength, default 0.2. The same number means different things,
+        # so it is not forwarded, and saying so beats discarding it in silence.
+        @warn "-L \"$(method),$(spec[2])\": the Julia reconstruction uses MRSI.jl's " *
+              "own L2 strength (L2_beta=0.2). The value is MATLAB's correction " *
+              "factor and is not on that scale, so it is not applied here."
+    end
 end
 
 gradient_delay_us = [12.42 + 10.27im, 12.38 + 10.75im, 10.14 + 8.99im]  # MRSI.jl defaults
@@ -191,6 +207,7 @@ recon_kw = (
     lipid_decon = lipid_decon,
     gradient_delay_us = gradient_delay_us,
     zero_fill = zero_fill_flag,
+    lipid_decon_kw...,
 )
 
 # The water reference supplies the coil weights for the metabolite scan, the way
