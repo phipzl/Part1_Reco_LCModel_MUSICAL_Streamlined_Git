@@ -114,7 +114,9 @@ run_julia_reconstruction() {
             return 1
         fi
         echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $WalinetModel"
-        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel"; then
+        local WalinetB0=()
+        [[ ${b0_correction_flag:-0} -eq 1 ]] && WalinetB0=(--b0)
+        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel" ${WalinetB0[@]+"${WalinetB0[@]}"}; then
             # Deliberately not "return 1". That falls back to the MATLAB
             # reconstruction, which would fit uncleaned spectra and report success
             # for a run that asked for the removal.

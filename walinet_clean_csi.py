@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Remove water and lipids from a reconstructed CSI, for LCModel to fit.
 
-    python walinet_clean_csi.py <tmp_dir> <model>
+    python walinet_clean_csi.py <tmp_dir> <model> [--b0]
 
 WALINET normally sits inside the deepmrsi quantification, which fits with dlfit or
 gpufit and replaces LCModel. This runs only the removal and writes the result
@@ -24,7 +24,7 @@ import h5py
 import numpy as np
 
 
-def main(tmp_dir, model):
+def main(tmp_dir, model, b0=False):
     out_path = read_out_path(tmp_dir)
     combined = os.path.join(out_path, "CombinedCSI.mat")
     if not os.path.isfile(combined):
@@ -33,6 +33,13 @@ def main(tmp_dir, model):
     csi = load_csi(combined)
     mask = load_mask(tmp_dir, csi.shape[:3])
     print(f"walinet_clean_csi: csi {csi.shape}, {int(mask.sum())} voxels in the mask")
+
+    if b0:
+        reference, dwelltime = load_reference_and_dwelltime(combined)
+        if reference is None:
+            sys.exit("ERROR: -0 asked for the B0 correction but CombinedCSI.mat carries no "
+                     "image_FullFID or RecoPar. Reconstruct with a current Part1.")
+        csi = apply_b0(csi, reference, dwelltime, mask)
 
     clean = run_walinet(csi, mask, model, larmor_hz=read_larmor_hz(tmp_dir))
 
@@ -135,6 +142,39 @@ def load_mask(tmp_dir, shape):
     return mask if mask.any() else np.ones(shape, dtype=bool)
 
 
+def load_reference_and_dwelltime(path):
+    """The uncombined reference and the dwelltime, for the B0 map.
+
+    run_julia_reco.jl stores both beside the CSI: image_FullFID.Data is the
+    uncombined PATREFSCAN, which is what the phase difference is measured on,
+    and RecoPar.Dwelltimes is in nanoseconds.
+    """
+    with h5py.File(path, "r") as f:
+        if "image_FullFID/Data" not in f or "csi/RecoPar/Dwelltimes" not in f:
+            return None, None
+        raw = f["image_FullFID/Data"][()]
+        dwelltime = float(np.ravel(f["csi/RecoPar/Dwelltimes"][()])[0])
+    if raw.dtype.names == ("real", "imag"):
+        ref = (raw["real"] + 1j * raw["imag"]).astype(np.complex64)
+    else:
+        ref = np.asarray(raw, dtype=np.complex64)
+    return ref.transpose(range(ref.ndim)[::-1]), dwelltime
+
+
+def apply_b0(csi, reference, dwelltime, mask):
+    """Correct the field shift, in the order the online route uses.
+
+    deepmrsi corrects the combined FIDs immediately before handing them to the
+    removal, so the same is done here rather than anywhere more convenient.
+    """
+    from deep_crt_mrsi.b0_correction import B0_correct_fids, calculate_B0
+
+    b0 = calculate_B0(reference, dwelltime)
+    print(f"walinet_clean_csi: B0 map median {np.median(b0):.2f} Hz, "
+          f"5-95% {np.percentile(b0, 5):.1f}..{np.percentile(b0, 95):.1f} Hz")
+    return B0_correct_fids(csi, b0, dwelltime, brainmask=mask)
+
+
 def run_walinet(csi, mask, model, larmor_hz=None):
     import walinet.package_config as conf
     import walinet.remove_water_and_lipids as rw
@@ -170,4 +210,5 @@ def run_walinet(csi, mask, model, larmor_hz=None):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    Args = [a for a in sys.argv[1:] if a != "--b0"]
+    main(Args[0], Args[1] if len(Args) > 1 else None, b0="--b0" in sys.argv)
