@@ -4,10 +4,10 @@
     python walinet_clean_csi.py <tmp_dir> <model>
 
 WALINET normally sits inside the deepmrsi quantification, which fits with dlfit or
-gpufit and replaces LCModel. This runs only the removal, in the time domain, and
-writes the result back beside the reconstruction so the ordinary LCModel path
-fits cleaned spectra instead. Nothing is transformed to the frequency domain and
-back, so no FFT convention has to agree with anyone.
+gpufit and replaces LCModel. This runs only the removal and writes the result
+back beside the reconstruction, so the ordinary LCModel path fits cleaned spectra
+instead. The reconstruction stores FIDs and the removal takes spectra, so this
+transforms in both directions with deepmrsi.py's convention.
 
 Reads  <out_path>/CombinedCSI.mat   csi.Data, as run_julia_reco.jl writes it
        <tmp_dir>/mask_brain.raw     the same mask MRSI_Reconstruction uses
@@ -75,19 +75,27 @@ def load_csi(path):
 def save_csi(path, data):
     """Write the cleaned FIDs back into the same dataset.
 
-    In place, so every MATLAB attribute and everything else in the file survives
-    untouched. Only the values change, and the shape has to match what was read.
+    Everything else in the file survives untouched. The FID axis may be shorter
+    than what was read, because the model bounds the length it accepts; a fixed
+    size dataset cannot shrink, so that case is replaced rather than assigned
+    into, carrying the MATLAB attributes over so the file stays readable there.
     """
-    packed = np.empty(data.transpose(range(data.ndim)[::-1]).shape,
-                      dtype=[("real", "<f4"), ("imag", "<f4")])
     flipped = data.transpose(range(data.ndim)[::-1])
+    packed = np.empty(flipped.shape, dtype=[("real", "<f4"), ("imag", "<f4")])
     packed["real"] = flipped.real
     packed["imag"] = flipped.imag
     with h5py.File(path, "r+") as f:
         dset = f["csi/Data"]
-        if dset.shape != packed.shape:
+        if dset.shape == packed.shape:
+            dset[...] = packed
+            return
+        if dset.shape[1:] != packed.shape[1:] or dset.shape[0] < packed.shape[0]:
             sys.exit(f"ERROR: cleaned data is {packed.shape}, the file holds {dset.shape}.")
-        dset[...] = packed
+        attrs = dict(dset.attrs)
+        del f["csi/Data"]
+        new = f["csi"].create_dataset("Data", data=packed)
+        for name, value in attrs.items():
+            new.attrs[name] = value
 
 
 def load_mask(tmp_dir, shape):
@@ -114,7 +122,21 @@ def run_walinet(csi, mask, model):
         conf.PACKAGE_CONFIG.model_relative_path = conf.resolve_model_relative_path(model)
     print(f"walinet_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
 
-    clean = rw.remove_water_and_lipids(csi, mask)
+    limit = rw.supported_fid_length()
+    if limit is not None and csi.shape[-1] > limit:
+        print(f"walinet_clean_csi: cropping the FID from {csi.shape[-1]} to {limit}, "
+              "the longest this model was trained for")
+        csi = csi[..., :limit]
+
+    # remove_water_and_lipids takes spectra: it inverts this transform to recover
+    # the FID it feeds the network, so handing it a FID would run the network on
+    # time-domain data. Same convention as deepmrsi.py.
+    spectra = np.fft.fftshift(np.fft.fft(csi, axis=-1), axes=-1)
+    clean_spectra = rw.remove_water_and_lipids(spectra, mask)
+    clean = np.fft.ifft(
+        np.fft.ifftshift(clean_spectra, axes=-1), axis=-1
+    ).astype(np.complex64)
+
     # isfinite on the complex array directly: .view(np.float32) needs a
     # contiguous last axis and raises on anything WALINET returns as a view.
     if not np.all(np.isfinite(clean)):
