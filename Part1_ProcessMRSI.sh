@@ -102,7 +102,10 @@ if [ ! -d "$tmp_dir" ]; then
     exit 1
 fi
 chmod 775 "$tmp_dir"
-abs_tmp_dir=$(readlink -f "$tmp_dir")
+# Exported because create_mask.sh runs as a separate process and sources
+# run_matlab.sh, which passes this to every MATLAB entry point. Without it the
+# mask flip is called with an empty path and reports a missing /Parameters.mat.
+export abs_tmp_dir=$(readlink -f "$tmp_dir")
 
 # -1.4 Write the script output to a logfile
 logfile=${tmp_dir}/logfile.log
