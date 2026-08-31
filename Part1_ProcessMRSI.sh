@@ -192,7 +192,6 @@ LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
 export deep_learning_fitting=""
-export deep_learning_walinet_model=""
 
 while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
     case $OPTION in
@@ -358,17 +357,16 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         ;;
     Q)
         export deep_learning_flag=1
-        # The fitting backend and the WALINET model are optional arguments of -Q,
-        # taken in that order. Same rule as for -S: only take the next word if it
-        # exists and is not the next option.
-        for QArgument in deep_learning_fitting deep_learning_walinet_model; do
-            NextArg=""
-            [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
-            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
-                export "$QArgument=$NextArg"
-                ((OPTIND = OPTIND + 1))
-            fi
-        done
+        # The fitting backend is an optional argument of -Q. Same rule as for -S:
+        # only take the next word if it exists and is not the next option.
+        # WALINET is not selected here. It is a lipid decontamination method and
+        # belongs to -L, so that the fitter fits whatever it is handed.
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            export "deep_learning_fitting=$NextArg"
+            ((OPTIND = OPTIND + 1))
+        fi
         ;;
     l)
         export dont_compute_LCM_flag=1
@@ -424,7 +422,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given.
+-Q  {fitting}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\"; without it the deepmrsi default is used. This selects the fitter only. WALINET is a lipid decontamination method and is requested through -L, which runs it on the reconstruction before the fitting, so -L \"WALINET,7T\" -Q gpufit fits WALINET-cleaned spectra.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -512,21 +510,6 @@ if [[ $priors_flag -eq 1 ]]; then
     done
 fi
 
-# WALINET can be reached two ways and they do the same thing: -L runs it on the
-# reconstruction, and -Q's second argument runs it inside deepmrsi before the deep
-# fitting. Asking for both removes water and lipids twice, which no error would
-# report because twice-cleaned spectra still look like spectra.
-if [[ $LipidDecon_flag -eq 1 ]] && [[ ${LipidDecon_MethodAndNoOfLoops%%,*} =~ ^([Ww][Aa][Ll][Ii][Nn][Ee][Tt])$ ]]    && [[ $deep_learning_flag -eq 1 ]] && [[ -n $deep_learning_walinet_model ]]    && [[ $deep_learning_walinet_model != "off" ]]; then
-    echo -e "
-WALINET is requested twice: once as the lipid decontamination (-L) and once"
-    echo "    inside the deep quantification (-Q $deep_learning_fitting $deep_learning_walinet_model)."
-    echo "    Water and lipids would be removed twice. Use -L for WALINET followed by LCModel,"
-    echo "    or -Q for WALINET followed by the deep fitting, and pass \"off\" as -Q's model"
-    echo "    if you want the deep fitting without a second removal."
-    TerminateProgram $DebugFlag 1
-    exit 1
-fi
-
 # 6.
 ###########   Process Data, Prepare LCModel Fitting   ############
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
@@ -553,9 +536,10 @@ if [[ $deep_learning_flag -eq 1 ]]; then
     if [[ -n $deep_learning_fitting ]]; then
         DeepLearningOptions+=(--fitting "$deep_learning_fitting")
     fi
-    if [[ -n $deep_learning_walinet_model ]]; then
-        DeepLearningOptions+=(--walinet_model "$deep_learning_walinet_model")
-    fi
+    # Always off. WALINET is reached through -L, which runs it on the
+    # reconstruction before this step, so leaving deepmrsi's own removal enabled
+    # would take out water and lipids a second time and report nothing.
+    DeepLearningOptions+=(--walinet_model off)
     DeepLearningScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     DeepLearningPython=$(command -v python3 || command -v python)
     if [[ -z $DeepLearningPython ]]; then
