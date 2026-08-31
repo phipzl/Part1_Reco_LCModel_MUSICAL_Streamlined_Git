@@ -34,7 +34,7 @@ def main(tmp_dir, model):
     mask = load_mask(tmp_dir, csi.shape[:3])
     print(f"walinet_clean_csi: csi {csi.shape}, {int(mask.sum())} voxels in the mask")
 
-    clean = run_walinet(csi, mask, model)
+    clean = run_walinet(csi, mask, model, larmor_hz=read_larmor_hz(tmp_dir))
 
     backup = os.path.join(out_path, "CombinedCSI_beforeWalinet.mat")
     if not os.path.isfile(backup):
@@ -42,6 +42,27 @@ def main(tmp_dir, model):
         print(f"walinet_clean_csi: kept the original as {backup}")
     save_csi(combined, clean)
     print(f"walinet_clean_csi: wrote the cleaned FIDs to {combined}")
+
+
+def read_larmor_hz(tmp_dir):
+    """The acquisition frequency, so the model's field can be checked against it.
+
+    Best effort: without it the length guard still catches a grossly wrong model,
+    so a missing value degrades the check rather than blocking the run.
+    """
+    par_file = os.path.join(tmp_dir, "InitialParameters.json")
+    if not os.path.isfile(par_file):
+        return None
+    try:
+        with open(par_file) as f:
+            par = json.load(f)
+    except (OSError, ValueError):
+        return None
+    for key in ("LarmorFreq", "larmor_frequency", "larmor_freq"):
+        value = par.get(key)
+        if value:
+            return float(value)
+    return None
 
 
 def read_out_path(tmp_dir):
@@ -114,7 +135,7 @@ def load_mask(tmp_dir, shape):
     return mask if mask.any() else np.ones(shape, dtype=bool)
 
 
-def run_walinet(csi, mask, model):
+def run_walinet(csi, mask, model, larmor_hz=None):
     import walinet.package_config as conf
     import walinet.remove_water_and_lipids as rw
 
@@ -122,11 +143,11 @@ def run_walinet(csi, mask, model):
         conf.PACKAGE_CONFIG.model_relative_path = conf.resolve_model_relative_path(model)
     print(f"walinet_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
 
-    limit = rw.supported_fid_length()
-    if limit is not None and csi.shape[-1] > limit:
-        print(f"walinet_clean_csi: cropping the FID from {csi.shape[-1]} to {limit}, "
-              "the longest this model was trained for")
-        csi = csi[..., :limit]
+    # Cropping and the field check live in walinet so both routes into it refuse
+    # the same things. Doing the crop here was how "-L WALINET,3T" on a 7T scan
+    # stopped being an error: the 3T model merely made the acquisition look long,
+    # and it was quietly cut from 840 points to 288 and processed anyway.
+    csi = rw.crop_to_supported_length(csi, larmor_hz=larmor_hz)
 
     # remove_water_and_lipids takes spectra: it inverts this transform to recover
     # the FID it feeds the network, so handing it a FID would run the network on
