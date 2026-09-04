@@ -51,3 +51,31 @@ def read_record(combined):
     if abs(float(describes.get("mtime", 0)) - stat.st_mtime) > _MTIME_TOLERANCE_S:
         return {}
     return record
+
+
+def _main(argv):
+    """Record from a shell step, which knows what ran but not how to write it.
+
+        python processing_record.py <tmp_dir> b0_corrected=true
+
+    The MATLAB reconstruction aligns the frequency inside itself, so nothing
+    python-side sees it happen; run_matlab.sh calls this once it has, and the
+    deep fitting then reads the same record the Julia route leaves.
+    """
+    import combined_csi_io
+
+    if len(argv) < 2:
+        raise SystemExit(_main.__doc__)
+    combined = combined_csi_io.combined_path(argv[0])
+    applied = {}
+    for pair in argv[1:]:
+        key, _, value = pair.partition("=")
+        applied[key] = value.lower() in ("true", "1", "yes")
+    write_record(combined, **applied)
+    print(f"processing_record: {record_path(combined)} says {applied}")
+
+
+if __name__ == "__main__":
+    import sys
+
+    _main(sys.argv[1:])

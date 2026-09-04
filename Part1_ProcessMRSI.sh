@@ -194,7 +194,7 @@ export julia_mmap="false"
 export b0_correction_flag=0
 export deep_learning_fitting=""
 
-while getopts '0c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -369,9 +369,6 @@ while getopts '0c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:
             ((OPTIND = OPTIND + 1))
         fi
         ;;
-    0)
-        export b0_correction_flag=1
-        ;;
     l)
         export dont_compute_LCM_flag=1
         ;;
@@ -394,7 +391,7 @@ mandatory:
 
 optional:
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
--A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
+-A  [\"Patref\" Or \"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment. \"Patref\" derives the field map from the reference scan the way the online FIRE route does, needs no second acquisition, and is the only method the Julia reconstruction (-S) implements; it is also applied before a \"WALINET\" removal, whose model expects corrected data. The other methods run inside the MATLAB reconstruction and are either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
 -D  [DebugAdditionalInput]  A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
 -e  [LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
@@ -407,7 +404,6 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--0    Correct the B0 field shift before the WALINET removal, the way the online FIRE route does. The map is derived from the uncombined reference and applied to the reconstructed FIDs immediately before the water and lipid removal, so it needs -L \"WALINET,...\" to have anything to run before. Off by default. It moves the correction earlier rather than switching it on: the -Q deep fitting corrects on its own when nothing has yet, and never twice.
 -L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
@@ -440,6 +436,34 @@ done
 
 shift $((OPTIND - 1))
 
+# -A takes "Method" or "Method,Path". The method decides which estimator runs and
+# where, so it is resolved once here rather than re-parsed at each use.
+#
+#   Alignment          the water peak search, in the MATLAB reconstruction
+#   Alignment,Path     an external dual echo field map, in the MATLAB reconstruction
+#   Overdiscrete,Path  as above, reconstructed overdiscrete
+#   Patref             the reference scan phase evolution, the estimator the online
+#                      FIRE route uses. It needs no second acquisition, and it is
+#                      the one method both reconstructions implement.
+#
+# Exactly one of them runs. Two flags for one correction is how the field came to
+# be removed twice, once in the reconstruction and once in the deep fitting.
+export AlignFreq_selected_method="${AlignFreq_MethodAndPath%%,*}"
+export b0_correction_flag=0
+if [[ $AlignFreq_flag -eq 1 ]]; then
+    case "$AlignFreq_selected_method" in
+        Patref)
+            export b0_correction_flag=1
+            ;;
+        Alignment | Overdiscrete) ;;
+        *)
+            echo -e "\n-A: unknown method '$AlignFreq_selected_method'."
+            echo "    Use Patref, Alignment, \"Alignment,<path>\" or \"Overdiscrete,<path>\"."
+            exit 1
+            ;;
+    esac
+fi
+
 ###0. GH: measure time elapsed:
 START=$(date +%s.%N)
 
@@ -447,6 +471,9 @@ START=$(date +%s.%N)
 echo -e "\n\n1. Create Directories\n\n"
 rm -Rf "$out_path/"*.mat
 rm -Rf "$out_path/scalings/"*.mat
+# Everything under AlignFreq is derived from this run. A shift map left by a
+# previous one is what a later step would read as "the frequency was aligned".
+rm -Rf "$out_path/AlignFreq"
 mkdir -p "$out_path/maps"
 mkdir -p "$out_path/phamaps"
 mkdir -p "$out_path/spectra"
@@ -497,7 +524,10 @@ echo -e "\n\n4. CREATE MASK\n\n"
 # read -p "Stop before creating B0Map."
 ## 5.
 ############# CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA ############
-if [[ $AlignFreq_flag -eq 1 ]] && ! [[ $AlignFreq_MethodAndPath == "" ]]; then
+# Only a method that names an external map has one to build. Patref derives its
+# map from the reference scan inside the reconstruction, and the water peak
+# search needs no map at all.
+if [[ $AlignFreq_flag -eq 1 ]] && [[ "$AlignFreq_MethodAndPath" == *,* ]]; then
     echo -e "\n\n5. CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA\n\n"
     ./create_B0Map.sh
 fi

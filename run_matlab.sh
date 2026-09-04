@@ -85,6 +85,12 @@ run_julia_reconstruction() {
         echo -e "\nThe Julia output cannot be used, julia_write_lcm_files was not found."
         return 1
     fi
+    if [[ $AlignFreq_flag -eq 1 ]] && [[ $AlignFreq_selected_method != "Patref" ]]; then
+        echo -e "\nThe Julia reconstruction implements -A Patref only. $AlignFreq_selected_method runs"
+        echo "    inside the MATLAB reconstruction, so it would be prepared here and then"
+        echo "    discarded. Use -A Patref, which needs no second acquisition, or drop -S."
+        return 1
+    fi
     if [[ $WaterReference_flag -eq 1 ]] && [[ ${WaterReference_MethodAndFile%%,*} != "W1" ]]; then
         echo -e "\nThe Julia reconstruction supports W1 water referencing only. W2 fits the"
         echo "    water separately, which needs its own LCModel files written for it."
@@ -105,6 +111,26 @@ run_julia_reconstruction() {
     if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
         return 0
     fi
+    # -A Patref, at the same point in the chain as MATLAB's alignment: on the
+    # finished reconstruction, before anything downstream reads it.
+    if [[ ${b0_correction_flag:-0} -eq 1 ]]; then
+        local B0Python
+        B0Python=$(command -v python3 || command -v python)
+        if [[ -z $B0Python ]]; then
+            echo -e "\nNeither python3 nor python was found, cannot run -A Patref."
+            return 1
+        fi
+        echo -e "\nRun this command: $B0Python $ScriptDir/apply_b0_patref.py $abs_tmp_dir"
+        if ! "$B0Python" "$ScriptDir/apply_b0_patref.py" "$abs_tmp_dir"; then
+            # Deliberately not "return 1". That falls back to the MATLAB
+            # reconstruction, which would report success for a run whose
+            # correction never happened.
+            echo -e "\napply_b0_patref.py failed, stopping."
+            declare -f matlab_step_failed >/dev/null && matlab_step_failed apply_b0_patref.py
+            exit 1
+        fi
+    fi
+
     if walinet_is_the_lipid_decon; then
         local WalinetPython WalinetModel
         WalinetPython=$(command -v python3 || command -v python)
@@ -113,10 +139,8 @@ run_julia_reconstruction() {
             echo -e "\nNeither python3 nor python was found, cannot run the WALINET lipid decontamination."
             return 1
         fi
-        local WalinetB0=()
-        [[ ${b0_correction_flag:-0} -eq 1 ]] && WalinetB0=(--b0)
-        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $WalinetModel ${WalinetB0[*]}"
-        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel" ${WalinetB0[@]+"${WalinetB0[@]}"}; then
+        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $WalinetModel"
+        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel"; then
             # Deliberately not "return 1". That falls back to the MATLAB
             # reconstruction, which would fit uncleaned spectra and report success
             # for a run that asked for the removal.
@@ -142,6 +166,21 @@ run_julia_reconstruction() {
 }
 
 # Argument $1: CurAv argument for MRSI_Reconstruction.m
+# The MATLAB reconstruction aligns the frequency inside itself, so no python step
+# sees it happen and the deep fitting would correct the same data again. MATLAB
+# saves AlignFreq_ShiftMap.mat in every branch of the alignment, whichever method
+# ran, so that file is the evidence rather than the flag: a run that asked for
+# alignment and did not get it leaves no record and is corrected downstream.
+record_matlab_alignment() {
+    [[ ${AlignFreq_flag:-0} -eq 1 ]] || return 0
+    [[ -f "$out_path/AlignFreq/AlignFreq_ShiftMap.mat" ]] || return 0
+    local RecordPython RecordScriptDir
+    RecordPython=$(command -v python3 || command -v python)
+    [[ -n $RecordPython ]] || return 0
+    RecordScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    "$RecordPython" "$RecordScriptDir/processing_record.py" "$abs_tmp_dir" b0_corrected=true
+}
+
 run_mrsi_reconstruction() {
     if [[ $julia_reconstruction -eq 1 ]]; then
         if run_julia_reconstruction "$1"; then
@@ -174,4 +213,5 @@ run_mrsi_reconstruction() {
         fi
         $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1); catch ME; disp(getReport(ME)); exit(1); end; exit(0)" || matlab_step_failed MRSI_Reconstruction
     fi
+    record_matlab_alignment
 }
