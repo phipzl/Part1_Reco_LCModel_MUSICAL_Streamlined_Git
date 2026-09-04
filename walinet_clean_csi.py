@@ -41,7 +41,7 @@ def main(tmp_dir, model, b0=False):
                      "image_FullFID or RecoPar. Reconstruct with a current Part1.")
         csi = apply_b0(csi, reference, dwelltime, mask)
 
-    clean = run_walinet(csi, mask, model, larmor_hz=read_larmor_hz(tmp_dir))
+    clean = run_walinet(csi, mask, model, larmor_hz=read_larmor_hz(combined, tmp_dir))
 
     backup = os.path.join(out_path, "CombinedCSI_beforeWalinet.mat")
     if not os.path.isfile(backup):
@@ -51,12 +51,23 @@ def main(tmp_dir, model, b0=False):
     print(f"walinet_clean_csi: wrote the cleaned FIDs to {combined}")
 
 
-def read_larmor_hz(tmp_dir):
-    """The acquisition frequency, so the model's field can be checked against it.
+def read_larmor_hz(combined, tmp_dir):
+    """The acquisition frequency in Hz, so the model's field can be checked.
 
-    Best effort: without it the length guard still catches a grossly wrong model,
-    so a missing value degrades the check rather than blocking the run.
+    The reconstruction stores it beside the data it wrote, as csi.RecoPar
+    LarmorFreq, and that copy describes these FIDs. InitialParameters.json is
+    only a fallback: write_InitialParameters.sh does not put the frequency
+    there, so on its own it left the field unchecked and the crop refused a
+    wrong model in its place.
     """
+    try:
+        with h5py.File(combined, "r") as f:
+            if "csi/RecoPar/LarmorFreq" in f:
+                value = float(np.ravel(f["csi/RecoPar/LarmorFreq"][()])[0])
+                if value:
+                    return value
+    except OSError:
+        pass
     par_file = os.path.join(tmp_dir, "InitialParameters.json")
     if not os.path.isfile(par_file):
         return None
@@ -184,9 +195,9 @@ def run_walinet(csi, mask, model, larmor_hz=None):
     print(f"walinet_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
 
     # Cropping and the field check live in walinet so both routes into it refuse
-    # the same things. Doing the crop here was how "-L WALINET,3T" on a 7T scan
-    # stopped being an error: the 3T model merely made the acquisition look long,
-    # and it was quietly cut from 840 points to 288 and processed anyway.
+    # the same things. "-L WALINET,3T" on a 7T scan is the case they exist for:
+    # the 3T model merely makes the acquisition look long, and without the check
+    # it is cut from 840 points to 288 and processed anyway.
     csi = rw.crop_to_supported_length(csi, larmor_hz=larmor_hz)
 
     # remove_water_and_lipids takes spectra: it inverts this transform to recover
