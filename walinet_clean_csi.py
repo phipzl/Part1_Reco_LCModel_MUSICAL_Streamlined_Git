@@ -22,6 +22,7 @@ import sys
 
 import h5py
 import numpy as np
+import processing_record
 
 
 def main(tmp_dir, model, b0=False):
@@ -49,6 +50,9 @@ def main(tmp_dir, model, b0=False):
         print(f"walinet_clean_csi: kept the original as {backup}")
     save_csi(combined, clean)
     print(f"walinet_clean_csi: wrote the cleaned FIDs to {combined}")
+    # The deep quantification reads this same file. Without the record it would
+    # correct the field a second time on data that already carries it.
+    processing_record.write_record(combined, b0_corrected=bool(b0))
 
 
 def read_larmor_hz(combined, tmp_dir):

@@ -22,6 +22,7 @@ import os
 import sys
 
 import numpy as np
+import processing_record
 
 parser = argparse.ArgumentParser(description="Quantify the reconstructed MRSI data with deepmrsi.")
 parser.add_argument("tmp_dir", help="temporary directory of the current run")
@@ -38,6 +39,9 @@ except ImportError:
 
 parser.add_argument("--walinet_model", choices=WALINET_MODEL_CHOICES, default=None,
                     help="WALINET model for the lipid suppression, deepmrsi decides if it is not given")
+parser.add_argument("--b0_correction", choices=("true", "false"), default=None,
+                    help="correct the field shift before fitting; Part1 passes -0 through here. "
+                         "Ignored when the reconstruction already carries the correction")
 args = parser.parse_args()
 
 tmp_dir = args.tmp_dir
@@ -76,6 +80,7 @@ except FileNotFoundError as missing_inputs:
     print(f"run_deepmrsi: no deepmrsi_inputs directory ({missing_inputs})")
 else:
     print(f"run_deepmrsi: reading the inputs from {inputs_dir}")
+
 
 def find_combined_csi(tmp_dir):
     """The reconstruction's CombinedCSI.mat, which carries the same data."""
@@ -141,6 +146,7 @@ def require(path, what):
 
 
 prescan = None
+combined_read_from = None
 if inputs_dir is not None:
     fid = load_nifti_complex(require(os.path.join(inputs_dir, "csi.nii.gz"), "csi.nii.gz"))
     patref = load_nifti_complex(require(os.path.join(inputs_dir, "musical.nii.gz"), "musical.nii.gz"))
@@ -167,6 +173,7 @@ else:
         sys.exit(1)
     print(f"run_deepmrsi: reading the inputs from {combined}")
     fid, patref, info = load_combined_csi(combined)
+    combined_read_from = combined
 
 print(f"run_deepmrsi: fid shape = {fid.shape}")
 print(f"run_deepmrsi: patref shape = {patref.shape}")
@@ -174,7 +181,7 @@ print(f"run_deepmrsi: patref shape = {patref.shape}")
 # Optional settings that deepmrsi understands, only passed on if they are there
 for key in ("bet_f", "bet_g", "walinet", "walinet_model", "fitting",
             "lipidSuppression_beta", "use_prescan_for_masking",
-            "writeWithoutSuppression", "makehomogeneous_sigma"):
+            "writeWithoutSuppression", "makehomogeneous_sigma", "b0_correction"):
     if key in meta:
         info[key] = meta[key]
 
@@ -184,6 +191,20 @@ if args.fitting is not None:
     info["fitting"] = args.fitting
 if args.walinet_model is not None:
     info["walinet_model"] = args.walinet_model
+if args.b0_correction is not None:
+    info["b0_correction"] = args.b0_correction == "true"
+
+# A step between the reconstruction and here may already have corrected the
+# field: the WALINET removal does, because its model is trained on corrected
+# data. deepmrsi is told so and skips its own correction rather than shifting
+# the FIDs a second time, and the fitter still learns the input is corrected.
+# Only for the file that was actually read: the record describes CombinedCSI.mat
+# and says nothing about a deepmrsi_inputs directory written separately.
+if combined_read_from is not None and processing_record.read_record(
+    combined_read_from
+).get("b0_corrected"):
+    print("run_deepmrsi: the reconstruction is already B0 corrected, not correcting again")
+    info["b0_corrected"] = True
 
 os.makedirs(output_dir, exist_ok=True)
 
@@ -199,6 +220,8 @@ print(f"  dwelltime={info['dwelltime']} ms, larmor_frequency={info['larmor_frequ
 print(f"  inplane_res={info['inplane_res']} mm, fov_slice={info['fov_slice']} mm")
 print(f"  fitting={info.get('fitting', 'deepmrsi default')}, "
       f"walinet_model={info.get('walinet_model', 'deepmrsi default')}")
+print(f"  b0_correction={info.get('b0_correction', 'deepmrsi default')}, "
+      f"input already corrected={info.get('b0_corrected', False)}")
 
 process_deep_mrsi_offline(fid, patref, info, output_dir, uncomb_prescan=prescan)
 

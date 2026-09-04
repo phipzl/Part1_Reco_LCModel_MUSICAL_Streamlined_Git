@@ -7,3 +7,4 @@ Matlab_Compiled/
 MatlabFunctions_notused/
 felix-cache/
 .nfs*
+__pycache__/
