@@ -194,7 +194,7 @@ export julia_mmap="false"
 export b0_correction_flag=0
 export deep_learning_fitting=""
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:t:T:v:w:W:X:z:dFKQSlu?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -307,31 +307,34 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
 
     S)
         export julia_reconstruction=1
-        # "threads" or "threads,mode". The mode says which reconstruction this
-        # run reproduces: ice, the online route, by default; or matlab.
-        export julia_n_threads="${OPTARG%%,*}"
+        # Both arguments are optional, the same way -Q's fitter is. Take the next
+        # word only when there is one and it is not the next option, so "-S -t
+        # [T1]" does not swallow -t and then process it twice.
+        export julia_n_threads="auto"
         export julia_parity_mode="ice"
-        if [[ "$OPTARG" == *,* ]]; then
-            export julia_parity_mode="${OPTARG#*,}"
-            case "$julia_parity_mode" in
-                ice | matlab) ;;
-                *)
-                    echo -e "\n-S: unknown mode '$julia_parity_mode'. Use ice or matlab."
-                    exit 1
-                    ;;
-            esac
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            # "threads" or "threads,mode". The mode says which reconstruction
+            # this run reproduces: ice, the online route, or matlab.
+            export julia_n_threads="${NextArg%%,*}"
+            [[ -z $julia_n_threads ]] && export julia_n_threads="auto"
+            [[ "$NextArg" == *,* ]] && export julia_parity_mode="${NextArg#*,}"
+            ((OPTIND = OPTIND + 1))
         fi
-        # The mmap argument is optional. Only take the next word if there is
-        # one and it is not the next option, otherwise "-S auto -t [T1]" would
-        # silently use "-t" as mmap setting and then process -t twice.
-        julia_mmap="false"
-        if [[ $OPTIND -le $# ]]; then
-            NextArg=${!OPTIND}
-            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
-                julia_mmap="$NextArg"
-                ((OPTIND = OPTIND + 1))
-            fi
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            export julia_mmap="$NextArg"
+            ((OPTIND = OPTIND + 1))
         fi
+        case "$julia_parity_mode" in
+            ice | matlab) ;;
+            *)
+                echo -e "\n-S: unknown mode '$julia_parity_mode'. Use ice or matlab."
+                exit 1
+                ;;
+        esac
         ;;
     t)
         export T1w_flag=1
@@ -425,7 +428,7 @@ optional:
 -r  [InPlaneCaipPattern_And_VD_Radius]  The InPlaneCaipPattern and the VD_Radius as used in ParallelImagingSimReco.m. Example: \"InPlaneCaipPattern = [0 0 0; 0 0 0; 0 0 1]; VD_Radius = 2;\".
 -R  [SliceAliasingPattern]
 -s  [NonCartTrajFile_path]  Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
--S  [threads{,mode}] [mmap]        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path. [mode] is which reconstruction this run reproduces: \"ice\" (default) follows the online scanner route, taking the frequency offset, the drift correction and the trajectory delays from the protocol the way ICE does; \"matlab\" reproduces MRSI_Reconstruction.m instead, which applies no drift correction and no trajectory delay unless -G asks for one. The two differ on real data, so pick the one you want to compare against, e.g. -S \"auto,matlab\".
+-S  {threads{,mode}} {mmap}        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). Both arguments may be left off. [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path. [mode] is which reconstruction this run reproduces: \"ice\" (default) follows the online scanner route, taking the frequency offset, the drift correction and the trajectory delays from the protocol the way ICE does; \"matlab\" reproduces MRSI_Reconstruction.m instead, which applies no drift correction and no trajectory delay unless -G asks for one. The two differ on real data, so pick the one you want to compare against, e.g. -S \"auto,matlab\".
 -t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If minc file is given instead of folder, it is treated as the magnitude file.
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
