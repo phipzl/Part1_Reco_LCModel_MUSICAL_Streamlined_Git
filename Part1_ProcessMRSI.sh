@@ -473,7 +473,10 @@ rm -Rf "$out_path/"*.mat
 rm -Rf "$out_path/scalings/"*.mat
 # Everything under AlignFreq is derived from this run. A shift map left by a
 # previous one is what a later step would read as "the frequency was aligned".
+# It is recreated straight away because MRSI_Reconstruction writes its shift map
+# and figures there without creating it, and saveas then fails mid-alignment.
 rm -Rf "$out_path/AlignFreq"
+[[ ${AlignFreq_flag:-0} -eq 1 ]] && mkdir -p "$out_path/AlignFreq"
 mkdir -p "$out_path/maps"
 mkdir -p "$out_path/phamaps"
 mkdir -p "$out_path/spectra"
