@@ -221,7 +221,11 @@ if get(p, "LipidDecon_flag", 0) == 1
     end
 end
 
-gradient_delay_us = [12.42 + 10.27im, 12.38 + 10.75im, 10.14 + 8.99im]  # MRSI.jl defaults
+# No delay unless -G asked for one. That is what Part1 documents ("If -G is not
+# used no gradient delay is used") and what the MATLAB reconstruction does;
+# MRSI.jl's own defaults are non-zero, and taking them here applied a trajectory
+# correction to every run that never asked for one.
+gradient_delay_us = [0.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]
 if get(p, "GradientDelay_flag", 0) == 1
     gd_str = string(get(p, "GradientDelay", ""))
     if !isempty(gd_str) && gd_str != "0"
@@ -230,7 +234,7 @@ if get(p, "GradientDelay_flag", 0) == 1
             # would create a local and the parsed delays would be discarded.
             global gradient_delay_us = parse_gradient_delays(gd_str)
         catch e
-            @warn "Could not read GradientDelay '$gd_str', using the MRSI.jl defaults: $e"
+            @warn "Could not read GradientDelay '$gd_str', reconstructing without a delay: $e"
         end
     end
 end
