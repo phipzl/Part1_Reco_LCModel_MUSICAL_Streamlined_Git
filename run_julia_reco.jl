@@ -240,12 +240,31 @@ mmap_val = mmap_arg == "true" ? true : mmap_arg == "false" ? false : :auto
 println("Julia: hamming=$hamming_flag, noise_decorrelation=$noisedecor_flag, lipid_decon=$lipid_decon")
 println("Julia: gradient_delay_us=$gradient_delay_us, mmap=$mmap_val, zero_fill=$zero_fill_flag")
 
+# MATLAB's MRSI_Reconstruction.m does no frequency drift correction: nothing in
+# Part1's MATLAB tree fits or applies one. MRSI.jl does, by default and in
+# agreement with the protocol flag the scanner itself sets, so on a scan with a
+# drift the two reconstructions differ by whatever that drift was. On the 7T
+# fixture it is about 3 Hz across the field map, which is more than any other
+# difference between them.
+#
+# The Julia default stays as it is, because agreeing with the scanner is the
+# behaviour worth having. JULIA_RECO_MATLAB_PARITY drops it, together with the
+# other settings MATLAB picks differently, so a run can be compared against the
+# MATLAB reconstruction of the same data rather than only against itself.
+matlab_parity = lowercase(get(ENV, "JULIA_RECO_MATLAB_PARITY", "false")) in ("1", "true", "yes")
+if matlab_parity
+    println("Julia: MATLAB parity mode, no frequency drift correction, " *
+            "z-Hamming in MATLAB's variant, coil reference point $MATLAB_REF_POINT")
+end
+
 recon_kw = (
     datatype = ComplexF32,
     mmap = mmap_val,
     do_noise_decorrelation = noisedecor_flag,
     do_hamming_filter = hamming_flag,
-    do_hamming_filter_z = hamming_flag,
+    do_hamming_filter_z = hamming_flag ? (matlab_parity ? :matlab : true) : false,
+    frequency_drift_correction = matlab_parity ? nothing : :per_TI,
+    ref_point_for_combine = MATLAB_REF_POINT,
     lipid_decon = lipid_decon,
     gradient_delay_us = gradient_delay_us,
     zero_fill = zero_fill_flag,
