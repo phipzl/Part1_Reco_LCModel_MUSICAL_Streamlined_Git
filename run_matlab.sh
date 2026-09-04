@@ -104,8 +104,8 @@ run_julia_reconstruction() {
 
     local ScriptDir
     ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    echo -e "\nRun this command: JULIA_NUM_THREADS=$julia_n_threads julia $ScriptDir/run_julia_reco.jl $abs_tmp_dir $1 $julia_mmap"
-    JULIA_NUM_THREADS="$julia_n_threads" julia "$ScriptDir/run_julia_reco.jl" "$abs_tmp_dir" "$1" "$julia_mmap" || return 1
+    echo -e "\nRun this command: JULIA_NUM_THREADS=$julia_n_threads julia $ScriptDir/run_julia_reco.jl $abs_tmp_dir $1 $julia_mmap ${julia_parity_mode:-ice}"
+    JULIA_NUM_THREADS="$julia_n_threads" julia "$ScriptDir/run_julia_reco.jl" "$abs_tmp_dir" "$1" "$julia_mmap" "${julia_parity_mode:-ice}" || return 1
 
     # The LCModel files are written once, after the last average
     if [[ -n "$NumberOfCSIFiles" ]] && [[ $1 -lt $NumberOfCSIFiles ]]; then
