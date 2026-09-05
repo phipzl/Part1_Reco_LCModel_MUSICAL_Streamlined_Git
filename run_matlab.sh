@@ -186,10 +186,20 @@ run_mrsi_reconstruction() {
         if run_julia_reconstruction "$1"; then
             return 0
         fi
-        # MRSI_Reconstruction adds an existing CombinedCSI.mat as a previous average,
-        # so a Julia pass that did not finish must not be left behind for it.
+        # No silent fallback to MATLAB. The two reconstructions are not
+        # interchangeable in what they cost: MATLAB needs far more memory for
+        # Part1, which is the reason -S exists, so a run that quietly switched
+        # could exhaust the machine on the very data -S was chosen to handle.
+        #
+        # MRSI_Reconstruction adds an existing CombinedCSI.mat as a previous
+        # average, so a Julia pass that did not finish must not be left behind.
         rm -f "$out_path/CombinedCSI.mat"
-        echo -e "Use the MATLAB reconstruction instead.\n"
+        echo
+        echo "The Julia reconstruction does not support this configuration, and the"
+        echo "    MATLAB one is not a drop-in substitute: it needs far more memory for"
+        echo "    Part1. Change the setting named above, or drop -S to choose the MATLAB"
+        echo "    reconstruction deliberately."
+        matlab_step_failed "the Julia reconstruction"
     fi
     # WALINET decontaminates the Julia output; the MATLAB reconstruction has no
     # equivalent, so reconstructing without it would drop the requested step.
