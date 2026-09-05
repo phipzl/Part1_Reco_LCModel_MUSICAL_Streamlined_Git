@@ -119,10 +119,6 @@ function combined_csi_contents(csi_data, dat_file, recon_kw, patref_override=not
     return contents
 end
 
-"""The water reference with its channels intact, as (x, y, z, t, cha).
-
-The deep fitting does its own coil combination, so it needs the uncombined
-reference; a combined one would be silently accepted as single-channel."""
 """Whatever the reconstruction handed back, as (x, y, z, t, cha)."""
 function as_uncombined_5d(patref)
     patref = patref isa AbstractVector ? first(patref) : patref
@@ -131,6 +127,10 @@ function as_uncombined_5d(patref)
            reshape(data, size(data, 1), size(data, 2), size(data, 3), size(data, 4), :)
 end
 
+"""The water reference with its channels intact, as (x, y, z, t, cha).
+
+The deep fitting does its own coil combination, so it needs the uncombined
+reference; a combined one would be silently accepted as single-channel."""
 function uncombined_patref(scan_info, recon_kw)
     haskey(scan_info, :PATREFSCAN) || return nothing
     reco = MRSI.reconstruct_uncombined(scan_info; scans=[:PATREFSCAN], recon_kw...)
