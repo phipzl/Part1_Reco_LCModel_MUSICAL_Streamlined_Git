@@ -69,7 +69,7 @@ TerminateProgram() {
     echo -e "\n\n\n\t\tE N D\n\n\n"
 
     if [[ "$Trapped" == "0" ]]; then
-        exit 0
+        exit "${2:-0}"
     fi
 }
 
@@ -102,7 +102,10 @@ if [ ! -d "$tmp_dir" ]; then
     exit 1
 fi
 chmod 775 "$tmp_dir"
-abs_tmp_dir=$(readlink -f "$tmp_dir")
+# Exported because create_mask.sh runs as a separate process and sources
+# run_matlab.sh, which passes this to every MATLAB entry point. Without it the
+# mask flip is called with an empty path and reports a missing /Parameters.mat.
+export abs_tmp_dir=$(readlink -f "$tmp_dir")
 
 # -1.4 Write the script output to a logfile
 logfile=${tmp_dir}/logfile.log
@@ -172,7 +175,11 @@ export julia_reconstruction=0
 export deep_learning_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
-export compiled_matlab_flag=0
+# A deployment with the MATLAB Runtime and no MATLAB can only take the compiled
+# route, and without this it would need -K on every call and otherwise die on
+# whatever matlabp points at. Same form as the paths in InstallProgramPaths.sh:
+# the environment decides, the Vienna default stands when it says nothing.
+export compiled_matlab_flag="${compiled_matlab_flag:-0}"
 #BOW
 export priors_flag=0
 export DebugAdditionalInput_flag=0
@@ -184,10 +191,10 @@ export phase_encoding_direction_is="AP"
 LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
+export b0_correction_flag=0
 export deep_learning_fitting=""
-export deep_learning_walinet_model=""
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKQlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:t:T:v:w:W:X:z:dFKQSlu?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -300,18 +307,34 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
 
     S)
         export julia_reconstruction=1
-        export julia_n_threads="$OPTARG"
-        # The mmap argument is optional. Only take the next word if there is
-        # one and it is not the next option, otherwise "-S auto -t [T1]" would
-        # silently use "-t" as mmap setting and then process -t twice.
-        julia_mmap="false"
-        if [[ $OPTIND -le $# ]]; then
-            NextArg=${!OPTIND}
-            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
-                julia_mmap="$NextArg"
-                ((OPTIND = OPTIND + 1))
-            fi
+        # Both arguments are optional, the same way -Q's fitter is. Take the next
+        # word only when there is one and it is not the next option, so "-S -t
+        # [T1]" does not swallow -t and then process it twice.
+        export julia_n_threads="auto"
+        export julia_parity_mode="ice"
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            # "threads" or "threads,mode". The mode says which reconstruction
+            # this run reproduces: ice, the online route, or matlab.
+            export julia_n_threads="${NextArg%%,*}"
+            [[ -z $julia_n_threads ]] && export julia_n_threads="auto"
+            [[ "$NextArg" == *,* ]] && export julia_parity_mode="${NextArg#*,}"
+            ((OPTIND = OPTIND + 1))
         fi
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            export julia_mmap="$NextArg"
+            ((OPTIND = OPTIND + 1))
+        fi
+        case "$julia_parity_mode" in
+            ice | matlab) ;;
+            *)
+                echo -e "\n-S: unknown mode '$julia_parity_mode'. Use ice or matlab."
+                exit 1
+                ;;
+        esac
         ;;
     t)
         export T1w_flag=1
@@ -351,17 +374,16 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         ;;
     Q)
         export deep_learning_flag=1
-        # The fitting backend and the WALINET model are optional arguments of -Q,
-        # taken in that order. Same rule as for -S: only take the next word if it
-        # exists and is not the next option.
-        for QArgument in deep_learning_fitting deep_learning_walinet_model; do
-            NextArg=""
-            [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
-            if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
-                export "$QArgument=$NextArg"
-                ((OPTIND = OPTIND + 1))
-            fi
-        done
+        # The fitting backend is an optional argument of -Q. Same rule as for -S:
+        # only take the next word if it exists and is not the next option.
+        # WALINET is not selected here. It is a lipid decontamination method and
+        # belongs to -L, so that the fitter fits whatever it is handed.
+        NextArg=""
+        [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
+        if [[ -n $NextArg ]] && [[ $NextArg != -* ]]; then
+            export "deep_learning_fitting=$NextArg"
+            ((OPTIND = OPTIND + 1))
+        fi
         ;;
     l)
         export dont_compute_LCM_flag=1
@@ -385,7 +407,7 @@ mandatory:
 
 optional:
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
--A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
+-A  [\"Patref\" Or \"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment. \"Patref\" derives the field map from the reference scan the way the online FIRE route does, needs no second acquisition, and is the only method the Julia reconstruction (-S) implements; it is also applied before a \"WALINET\" removal, whose model expects corrected data. The other methods run inside the MATLAB reconstruction and are either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
 -D  [DebugAdditionalInput]  A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
 -e  [LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
@@ -398,7 +420,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -406,18 +428,18 @@ optional:
 -r  [InPlaneCaipPattern_And_VD_Radius]  The InPlaneCaipPattern and the VD_Radius as used in ParallelImagingSimReco.m. Example: \"InPlaneCaipPattern = [0 0 0; 0 0 0; 0 0 1]; VD_Radius = 2;\".
 -R  [SliceAliasingPattern]
 -s  [NonCartTrajFile_path]  Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
--S  [threads] [mmap]        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path.
+-S  {threads{,mode}} {mmap}        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). Both arguments may be left off. [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path. [mode] is which reconstruction this run reproduces: \"ice\" (default) follows the online scanner route, taking the frequency offset, the drift correction and the trajectory delays from the protocol the way ICE does; \"matlab\" reproduces MRSI_Reconstruction.m instead, which applies no drift correction and no trajectory delay unless -G asks for one. The two differ on real data, so pick the one you want to compare against, e.g. -S \"auto,matlab\".
 -t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If minc file is given instead of folder, it is treated as the magnitude file.
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
--w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
+-w  [\"W1,Path\" Or \"W2,Path\"]  Water reference. Format: DAT or DICOM. The same scan as -c [csi file], but without water suppression. The method prefix is required: W1 uses LCModel 'Do Water Scaling', W2 quantifies the water separately and writes water maps, and W2 additionally needs -W [LCM_ControlFile]. A bare path has no prefix, so water referencing is switched off with a warning.
 -X  [XPACE MOTION LOG]      XPACE MOTION LOG
 
 Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  {fitting} {walinet model}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\", [walinet model] can be \"7T\", \"3T\" or \"off\". If they are not given, the deepmrsi defaults are used. To set only the model, both have to be given.
+-Q  {fitting}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\"; without it the deepmrsi default is used. This selects the fitter only. WALINET is a lipid decontamination method and is requested through -L, which runs it on the reconstruction before the fitting, so -L \"WALINET,7T\" -Q gpufit fits WALINET-cleaned spectra.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -430,6 +452,34 @@ done
 
 shift $((OPTIND - 1))
 
+# -A takes "Method" or "Method,Path". The method decides which estimator runs and
+# where, so it is resolved once here rather than re-parsed at each use.
+#
+#   Alignment          the water peak search, in the MATLAB reconstruction
+#   Alignment,Path     an external dual echo field map, in the MATLAB reconstruction
+#   Overdiscrete,Path  as above, reconstructed overdiscrete
+#   Patref             the reference scan phase evolution, the estimator the online
+#                      FIRE route uses. It needs no second acquisition, and it is
+#                      the one method both reconstructions implement.
+#
+# Exactly one of them runs. Two flags for one correction is how the field came to
+# be removed twice, once in the reconstruction and once in the deep fitting.
+export AlignFreq_selected_method="${AlignFreq_MethodAndPath%%,*}"
+export b0_correction_flag=0
+if [[ $AlignFreq_flag -eq 1 ]]; then
+    case "$AlignFreq_selected_method" in
+        Patref)
+            export b0_correction_flag=1
+            ;;
+        Alignment | Overdiscrete) ;;
+        *)
+            echo -e "\n-A: unknown method '$AlignFreq_selected_method'."
+            echo "    Use Patref, Alignment, \"Alignment,<path>\" or \"Overdiscrete,<path>\"."
+            exit 1
+            ;;
+    esac
+fi
+
 ###0. GH: measure time elapsed:
 START=$(date +%s.%N)
 
@@ -437,6 +487,12 @@ START=$(date +%s.%N)
 echo -e "\n\n1. Create Directories\n\n"
 rm -Rf "$out_path/"*.mat
 rm -Rf "$out_path/scalings/"*.mat
+# Everything under AlignFreq is derived from this run. A shift map left by a
+# previous one is what a later step would read as "the frequency was aligned".
+# It is recreated straight away because MRSI_Reconstruction writes its shift map
+# and figures there without creating it, and saveas then fails mid-alignment.
+rm -Rf "$out_path/AlignFreq"
+[[ ${AlignFreq_flag:-0} -eq 1 ]] && mkdir -p "$out_path/AlignFreq"
 mkdir -p "$out_path/maps"
 mkdir -p "$out_path/phamaps"
 mkdir -p "$out_path/spectra"
@@ -468,9 +524,11 @@ fi
 run_matlab GetPar_CreateTempl_MaskPart1 0
 
 # Terminate if there was an error
-bash "$tmp_dir/ErrorFile.sh"
+# shellcheck source=/dev/null
+source "$tmp_dir/ErrorFile.sh"   # sets ErrorInGetPar_CreateTempl; bash would lose it to a subshell
 if [[ $ErrorInGetPar_CreateTempl -eq 1 ]]; then
-    TerminateProgram $DebugFlag
+    echo -e "\n\nGetPar_CreateTempl_MaskPart1 reported: $ErrorMessage\n\n"
+    TerminateProgram $DebugFlag 1
 fi
 
 # read -rp "stop before create minc template"
@@ -485,7 +543,10 @@ echo -e "\n\n4. CREATE MASK\n\n"
 # read -p "Stop before creating B0Map."
 ## 5.
 ############# CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA ############
-if [[ $AlignFreq_flag -eq 1 ]] && ! [[ $AlignFreq_MethodAndPath == "" ]]; then
+# Only a method that names an external map has one to build. Patref derives its
+# map from the reference scan inside the reconstruction, and the water peak
+# search needs no map at all.
+if [[ $AlignFreq_flag -eq 1 ]] && [[ "$AlignFreq_MethodAndPath" == *,* ]]; then
     echo -e "\n\n5. CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA\n\n"
     ./create_B0Map.sh
 fi
@@ -529,8 +590,20 @@ if [[ $deep_learning_flag -eq 1 ]]; then
     if [[ -n $deep_learning_fitting ]]; then
         DeepLearningOptions+=(--fitting "$deep_learning_fitting")
     fi
-    if [[ -n $deep_learning_walinet_model ]]; then
-        DeepLearningOptions+=(--walinet_model "$deep_learning_walinet_model")
+    # Always off. WALINET is reached through -L, which runs it on the
+    # reconstruction before this step, so leaving deepmrsi's own removal enabled
+    # would take out water and lipids a second time and report nothing.
+    DeepLearningOptions+=(--walinet_model off)
+    # -0 asks for the field correction and reaches deepmrsi here. Where it
+    # actually happens is decided further down: the WALINET step corrects the
+    # reconstruction in place when it runs, and run_deepmrsi.py reads that from
+    # the record beside the file rather than correcting a second time.
+    #
+    # Nothing is passed without -0, so deepmrsi keeps its own default, which is
+    # to correct. -0 therefore moves the correction earlier, before the removal
+    # whose model was trained on corrected data, rather than switching it on.
+    if [[ ${b0_correction_flag:-0} -eq 1 ]]; then
+        DeepLearningOptions+=(--b0_correction true)
     fi
     DeepLearningScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     DeepLearningPython=$(command -v python3 || command -v python)
