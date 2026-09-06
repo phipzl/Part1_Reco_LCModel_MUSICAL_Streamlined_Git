@@ -42,6 +42,9 @@ parser.add_argument("--walinet_model", choices=WALINET_MODEL_CHOICES, default=No
 parser.add_argument("--b0_correction", choices=("true", "false"), default=None,
                     help="correct the field shift before fitting; Part1 passes -0 through here. "
                          "Ignored when the reconstruction already carries the correction")
+parser.add_argument("--mask", choices=("part1", "deepmrsi"), default="part1",
+                    help="which brain mask to fit: Part1's, cut to the excited volume "
+                         "(default), or the one deepmrsi derives from the reference scan")
 args = parser.parse_args()
 
 tmp_dir = args.tmp_dir
@@ -205,6 +208,34 @@ if combined_read_from is not None and processing_record.read_record(
 ).get("b0_corrected"):
     print("run_deepmrsi: the reconstruction is already B0 corrected, not correcting again")
     info["b0_corrected"] = True
+
+# Part1 masked the brain on the anatomical and cut the mask to the excited volume.
+# Fitting those voxels keeps the deep fitting on the same set as LCModel, instead
+# of deepmrsi's own reference-scan mask, which reaches into the periphery where
+# neither fitter is reliable.
+def find_part1_mask(tmp_dir, combined):
+    candidates = [os.path.join(tmp_dir, "mask_brain.raw")]
+    if combined is not None:
+        candidates.insert(0, os.path.join(os.path.dirname(combined), "maps", "mask.raw"))
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+if args.mask == "part1":
+    mask_raw = find_part1_mask(tmp_dir, combined_read_from)
+    grid = tuple(int(n) for n in fid.shape[:3])
+    values = np.fromfile(mask_raw, dtype="<f4") if mask_raw else np.empty(0)
+    if values.size == int(np.prod(grid)):
+        # Part1 writes the mask with z slowest; the arrays here are x, y, z.
+        mask = values.reshape(grid[2], grid[1], grid[0]).transpose(2, 1, 0) > 0.5
+        os.makedirs(output_dir, exist_ok=True)
+        info["mask_fn"] = os.path.join(output_dir, "part1_mask.nii.gz")
+        nib.save(nib.Nifti1Image(mask.astype(np.uint8), np.eye(4)), info["mask_fn"])
+        print(f"run_deepmrsi: fitting the {int(mask.sum())} voxels of Part1's mask, {mask_raw}")
+    else:
+        print("run_deepmrsi: no Part1 mask for this grid, deepmrsi masks on the reference scan")
 
 os.makedirs(output_dir, exist_ok=True)
 
