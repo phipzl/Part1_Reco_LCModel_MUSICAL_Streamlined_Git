@@ -388,6 +388,9 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:t:T:v:w:W:X:z
     l)
         export dont_compute_LCM_flag=1
         ;;
+    d)
+        DebugFlag=1
+        ;;
     u)
         export use_phantom_flag=1
         ;;
@@ -441,6 +444,7 @@ Flags:
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
 -Q  {fitting}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\"; without it the deepmrsi default is used. This selects the fitter only. WALINET is a lipid decontamination method and is requested through -L, which runs it on the reconstruction before the fitting, so -L \"WALINET,7T\" -Q gpufit fits WALINET-cleaned spectra.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
+-d  Debug: keep the temporary directory, and keep the LCModel input files (the .RAW and .control per voxel in [output directory]/spectra) instead of deleting them at the end. Together with -l this leaves a finished reconstruction that LCModel can be run on later with run_lcmodel_files.sh, so several fitters can be compared on one reconstruction.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
 " $(basename $0) >&2
