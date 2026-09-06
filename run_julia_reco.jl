@@ -14,6 +14,11 @@
 # Written to out_path:
 #   julia_csi.raw        accumulated complex float32, interleaved Re/Im, [Nx,Ny,Nz,Nt]
 #   julia_csi_watref.raw same layout, water reference only
+#   CombinedCSI.mat      csi.Data, the array MRSI_Reconstruction stores under the same
+#                        name, read by julia_write_lcm_files on the MATLAB side
+#   WaterReference.mat   weights.Data and WaterReferenceCSI, written on the water pass
+#                        in the layout MRSI_Reconstruction.m uses, so either pipeline
+#                        can read the other's coil weights
 # Written to tmp_dir:
 #   julia_recoinfo.m     CSI dimensions, read by julia_write_lcm_files on the MATLAB side
 
@@ -24,6 +29,7 @@ if get(ENV, "JULIA_MRSI_PKG", "") != ""
     Pkg.activate(ENV["JULIA_MRSI_PKG"]; io=devnull)
 end
 using JSON
+using MAT
 using MRSI
 
 """Parse a gradient delay string like "[12.56, 12.54, 10.08]" into complex microseconds.
@@ -55,6 +61,99 @@ function write_complex_raw(path::AbstractString, data::AbstractArray{<:Complex})
     end
 end
 
+# MRSI_Reconstruction.m reduces the reference to FID point 4 before taking the conj
+# (`:566-570`, then `:958`), so weights written here use the same point to stay
+# interchangeable with the ones it stores.
+const MATLAB_REF_POINT = 4
+
+"""Weights and data of the water reference, in the layout MRSI_Reconstruction.m writes:
+`weights.Data` is the raw conj of the reference, and `WaterReferenceCSI` carries the
+coil-compression count the metabolite pass compares against its own."""
+function write_water_reference(path, dat_file, csi_data, recon_kw)
+    scan_info = MRSI.read_scan_info(dat_file)
+    # MRSI_Reconstruction.m picks the method by channel count: MUSICAL at `:963`,
+    # and the phase-only "Phase VC" branch at `:968` for a single channel. Deriving
+    # with the wrong one gives weights that are simply different, not slightly off.
+    combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
+    weights = MRSI.coil_combine_weights(dat_file; ref_point_for_combine=MATLAB_REF_POINT,
+                                        combine_method, recon_kw...)
+    if isnothing(weights)
+        @warn "The water reference has no PATREFSCAN, so it cannot supply coil weights"
+        return
+    end
+    println("Julia: coil weights from FID point $MATLAB_REF_POINT, method $combine_method")
+    println("Julia: writing $path")
+    matwrite(path, Dict(
+        "weights" => Dict("Data" => weights),
+        "WaterReferenceCSI" => Dict(
+            "Data" => csi_data,
+            "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]))))
+end
+
+"""What deep_crt_mrsi.combined_csi reads out of a CombinedCSI.mat.
+
+It wants three things: the combined spectra as `csi.Data`, the UNCOMBINED water
+reference as `image_FullFID.Data`, and the acquisition parameters under
+`csi.RecoPar`. Writing only the spectra leaves the deep fitting unable to run at
+all, which is why the field names here are its names and not ours."""
+function combined_csi_contents(csi_data, dat_file, recon_kw, patref_override=nothing)
+    contents = Dict{String,Any}("csi" => Dict{String,Any}("Data" => csi_data))
+    scan_info = MRSI.read_scan_info(dat_file)
+    online = scan_info[:ONLINE]
+
+    contents["csi"]["RecoPar"] = Dict{String,Any}(
+        "Dwelltimes" => float(online[:dwelltime]),            # ns, as combined_csi expects
+        "LarmorFreq" => float(online[:larmor_frequency]),
+        "FoV_Read" => float(online[:fov_readout]),
+        "FoV_Partition" => float(online[:fov_slice]),
+        "nFreqEnc_FinalMatrix" => float(size(csi_data, 1)),   # after reconstruction, not the encoded size
+    )
+
+    patref = isnothing(patref_override) ? uncombined_patref(scan_info, recon_kw) :
+                                          as_uncombined_5d(patref_override)
+    if isnothing(patref)
+        @warn "No PATREFSCAN, so CombinedCSI.mat carries no image_FullFID and the deep fitting cannot read it"
+    else
+        contents["image_FullFID"] = Dict{String,Any}("Data" => patref)
+    end
+    return contents
+end
+
+"""Whatever the reconstruction handed back, as (x, y, z, t, cha)."""
+function as_uncombined_5d(patref)
+    patref = patref isa AbstractVector ? first(patref) : patref
+    data = Array{ComplexF32}(patref)
+    return ndims(data) == 5 ? data :
+           reshape(data, size(data, 1), size(data, 2), size(data, 3), size(data, 4), :)
+end
+
+"""The water reference with its channels intact, as (x, y, z, t, cha).
+
+The deep fitting does its own coil combination, so it needs the uncombined
+reference; a combined one would be silently accepted as single-channel."""
+function uncombined_patref(scan_info, recon_kw)
+    haskey(scan_info, :PATREFSCAN) || return nothing
+    reco = MRSI.reconstruct_uncombined(scan_info; scans=[:PATREFSCAN], recon_kw...)
+    patref = get(reco, :PATREFSCAN, nothing)
+    isnothing(patref) && return nothing
+    patref = patref isa AbstractVector ? first(patref) : patref
+    data = Array{ComplexF32}(patref)
+    return ndims(data) == 5 ? data : reshape(data, size(data, 1), size(data, 2), size(data, 3), size(data, 4), :)
+end
+
+"""`weights.Data` from a WaterReference.mat, whichever pipeline wrote it, or `nothing`.
+
+MATLAB drops trailing singleton dimensions when it saves, so a single-channel file
+comes back as (x, y, z) rather than the (x, y, z, 1, cha) the combination indexes."""
+function stored_coil_weights(path)
+    isfile(path) || return nothing
+    stored = matread(path)
+    weights = get(stored, "weights", nothing)
+    weights isa AbstractDict && haskey(weights, "Data") || return nothing
+    w = weights["Data"]
+    return ndims(w) == 5 ? w : reshape(w, size(w, 1), size(w, 2), size(w, 3), 1, :)
+end
+
 """Read a file written by write_complex_raw back into an array of size sz."""
 function read_complex_raw(path::AbstractString, sz::NTuple)
     n = prod(sz)
@@ -72,6 +171,13 @@ length(ARGS) < 2 && error("Usage: julia run_julia_reco.jl <tmp_dir> <cur_avg> [m
 tmp_dir = ARGS[1]
 cur_avg = parse(Int, ARGS[2])
 mmap_arg = length(ARGS) >= 3 ? ARGS[3] : "auto"
+# Which reconstruction this one reproduces. "ice" is the online route the scanner
+# runs; "matlab" is MRSI_Reconstruction.m. The two disagree about the frequency
+# drift, the trajectory delays and several smaller choices, so a run has to say
+# which of them it is trying to be rather than land between the two.
+parity_mode = length(ARGS) >= 4 && !isempty(ARGS[4]) ? lowercase(ARGS[4]) : "ice"
+parity_mode in ("ice", "matlab") ||
+    error("Unknown -S mode '$(parity_mode)'. Use ice or matlab.")
 
 par_file = joinpath(tmp_dir, "InitialParameters.json")
 isfile(par_file) || error("InitialParameters.json not found in $tmp_dir")
@@ -108,12 +214,35 @@ noisedecor_flag = get(p, "noisedecorrelation_flag", 0) == 1
 zero_fill_flag = get(p, "ZeroFillMetMaps_flag", 0) == 1
 
 lipid_decon = nothing
+lipid_decon_kw = NamedTuple()
 if get(p, "LipidDecon_flag", 0) == 1
-    method = uppercase(split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')[1])
-    lipid_decon = method == "L1" ? :L1 : :L2
+    spec = split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')
+    method = uppercase(spec[1])
+    value = length(spec) > 1 ? tryparse(Float64, spec[2]) : nothing
+    # WALINET is the alternative to the regularization, not an addition to it. It
+    # runs after the reconstruction, in walinet_clean_csi.py, so nothing happens here.
+    lipid_decon = method == "WALINET" ? nothing : method == "L1" ? :L1 : :L2
+
+    if lipid_decon == :L1 && !isnothing(value)
+        # An iteration count means the same thing on both sides.
+        lipid_decon_kw = (; L1_n_loops = round(Int, value))
+    elseif lipid_decon == :L2 && !isnothing(value)
+        # It does not follow for L2. MATLAB takes LipidDecon_L2BetaCorrFactor, a
+        # multiplier on a beta it computes, default 1; MRSI.jl takes L2_beta, an
+        # absolute strength, default 0.2. The same number means different things,
+        # so it is not forwarded, and saying so beats discarding it in silence.
+        @warn "-L \"$(method),$(spec[2])\": the Julia reconstruction uses MRSI.jl's " *
+              "own L2 strength (L2_beta=0.2). The value is MATLAB's correction " *
+              "factor and is not on that scale, so it is not applied here."
+    end
 end
 
-gradient_delay_us = [12.42 + 10.27im, 12.38 + 10.75im, 10.14 + 8.99im]  # MRSI.jl defaults
+# -G is the only thing that asks for a trajectory delay here. Part1 documents
+# "If -G is not used no gradient delay is used", which is what the MATLAB
+# reconstruction does; the online route instead takes the delays whenever the
+# protocol asks for them. So the value is only pinned when the caller gave one,
+# and each mode fills the gap the way its reference does.
+gradient_delay_us = nothing
 if get(p, "GradientDelay_flag", 0) == 1
     gd_str = string(get(p, "GradientDelay", ""))
     if !isempty(gd_str) && gd_str != "0"
@@ -122,7 +251,7 @@ if get(p, "GradientDelay_flag", 0) == 1
             # would create a local and the parsed delays would be discarded.
             global gradient_delay_us = parse_gradient_delays(gd_str)
         catch e
-            @warn "Could not read GradientDelay '$gd_str', using the MRSI.jl defaults: $e"
+            @warn "Could not read GradientDelay '$gd_str', reconstructing without a delay: $e"
         end
     end
 end
@@ -130,19 +259,69 @@ end
 mmap_val = mmap_arg == "true" ? true : mmap_arg == "false" ? false : :auto
 
 println("Julia: hamming=$hamming_flag, noise_decorrelation=$noisedecor_flag, lipid_decon=$lipid_decon")
-println("Julia: gradient_delay_us=$gradient_delay_us, mmap=$mmap_val, zero_fill=$zero_fill_flag")
+println("Julia: mode=$parity_mode, gradient_delay_us=$(something(gradient_delay_us, "protocol")), " *
+        "mmap=$mmap_val, zero_fill=$zero_fill_flag")
 
-result = MRSI.reconstruct(
-    dat_file;
+# What Part1's own flags ask for, in both modes.
+common_kw = (
     datatype = ComplexF32,
     mmap = mmap_val,
     do_noise_decorrelation = noisedecor_flag,
     do_hamming_filter = hamming_flag,
-    do_hamming_filter_z = hamming_flag,
     lipid_decon = lipid_decon,
-    gradient_delay_us = gradient_delay_us,
     zero_fill = zero_fill_flag,
+    lipid_decon_kw...,
 )
+
+# The settings MATLAB picks differently. Each one was measured against a
+# MRSI_Reconstruction.m run of the same data: with the delays and the drift fit
+# matched, the two reference scans agree exactly.
+matlab_kw = (
+    ice = false,
+    do_hamming_filter_z = hamming_flag ? :matlab : false,
+    frequency_drift_correction = nothing,
+    ref_point_for_combine = MATLAB_REF_POINT,
+    gradient_delay_us = something(gradient_delay_us, [0.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]),
+)
+
+# -G, when it was given, applies in both modes. Left out otherwise so the ICE
+# mode's protocol gating decides.
+delay_kw = isnothing(gradient_delay_us) ? (;) : (; gradient_delay_us)
+
+# What the helpers reconstruct the reference scan and the coil weights with. It
+# has to be the settings the CSI was reconstructed with, or the field map and the
+# weights come from a differently reconstructed reference than the data.
+recon_kw = parity_mode == "matlab" ? (; common_kw..., matlab_kw...) :
+                                     (; common_kw..., delay_kw...)
+
+# The water reference supplies the coil weights for the metabolite scan, the way
+# MRSI_Reconstruction.m reuses the ones it stored in WaterReference.mat. Without
+# this the two passes would be coil combined differently and could not be compared.
+watref_path = joinpath(out_path, "WaterReference.mat")
+coil_weights = is_water_ref ? nothing : stored_coil_weights(watref_path)
+isnothing(coil_weights) || println("Julia: combining with the water reference coil weights")
+
+ice_patref = nothing
+result = if parity_mode == "matlab"
+    scan_info = MRSI.read_scan_info(dat_file)
+    # Berni combines a single channel with unit-magnitude weights (Phase VC),
+    # not MUSICAL, and the choice changes the result rather than only its scale.
+    combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
+    MRSI.reconstruct(dat_file; common_kw..., matlab_kw..., combine_method, coil_weights)
+else
+    # reconstruct_like_ICE is the entry point ICE parity was established against:
+    # it reads alICEProgramPara for the frequency offset, the drift and the
+    # trajectory delays, exactly as ICE's Configurator does. Calling it is what
+    # makes this mode ICE-equivalent; mirroring its choices here would be a
+    # second copy to drift out of sync. prescan=false because Part1 has no use
+    # for the reconstructed PATREFANDIMASCAN and it is not free.
+    reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., coil_weights)
+    # Keep the reference scan it already reconstructed: reconstruct_uncombined
+    # would redo it through plain reconstruct, without the protocol gating, and
+    # the field map would then come from a different reference than the data.
+    global ice_patref = get(reco, :PATREFSCAN_UNCOMBINED, nothing)
+    reco[:ONLINE]
+end
 
 # MRSI.reconstruct returns the CSI array of the single repetition, but the Vector of
 # all repetitions as soon as the dataset has more than one.
@@ -178,10 +357,18 @@ end
 println("Julia: writing $out_raw")
 write_complex_raw(out_raw, csi_data)
 
+if is_water_ref
+    write_water_reference(watref_path, dat_file, csi_data, recon_kw)
+end
+
 if !is_water_ref && (n_files <= 1 || cur_avg == n_files)
     Nx, Ny = sz[1], sz[2]
     Nz = length(sz) >= 4 ? sz[3] : 1
     Nt = sz[end]
+    combined_path = joinpath(out_path, "CombinedCSI.mat")
+    println("Julia: writing $combined_path")
+    matwrite(combined_path, combined_csi_contents(csi_data, dat_file, recon_kw, ice_patref))
+
     recoinfo_path = joinpath(tmp_dir, "julia_recoinfo.m")
     println("Julia: writing $recoinfo_path")
     open(recoinfo_path, "w") do f
