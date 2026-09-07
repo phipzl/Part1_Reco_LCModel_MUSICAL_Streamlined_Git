@@ -469,6 +469,13 @@ if [[ $mask_flag -eq 0 ]]; then
     fi
 fi
 
+# BET takes its lipid surfaces from the anatomical, so without -t it has nothing
+# to run on and the mask chain fails several steps later. Refuse here instead.
+if [[ $mask_flag -eq 1 && $T1w_flag -eq 0 ]] && [[ "${mask_method,,}" == bet* ]]; then
+    echo "-m bet needs an anatomical (-t). Without one use -m thresh, -m voi or a mask file."
+    exit 1
+fi
+
 # -A takes "Method" or "Method,Path". The method decides which estimator runs and
 # where, so it is resolved once here rather than re-parsed at each use.
 #
