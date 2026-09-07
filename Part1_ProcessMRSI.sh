@@ -424,7 +424,7 @@ optional:
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
 -L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
--m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
+-m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m is not set, an anatomical given with -t is masked with \"bet,-f 0.33 -g 0\"; without -t no mask is used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
 -P  [prior_knowledge dir]   define directory that contains Extra maps (i.e., 0_pha_map.mnc, 1_pha_map.mnc, shift_map.mnc). THIS WORKS ONLY FOR USING MEGA-OFF PRIOR KNOWLEDGE FOR MEGA-DIFF-FITTING (because 180 deg is added to the 0-order phases)
@@ -455,6 +455,19 @@ Flags:
 done
 
 shift $((OPTIND - 1))
+
+# Without -m, an anatomical given with -t is masked with BET at the setting that
+# holds for T1-weighted data. Without either there is no mask, and every voxel of
+# the grid is fitted, so that is said out loud.
+if [[ $mask_flag -eq 0 ]]; then
+    if [[ $T1w_flag -eq 1 ]]; then
+        export mask_flag=1
+        export mask_method="bet,-f 0.33 -g 0"
+        echo "No -m given: masking the anatomical with \"$mask_method\"."
+    else
+        echo "WARNING: neither -m nor -t given: no brain mask, every voxel of the grid is fitted."
+    fi
+fi
 
 # -A takes "Method" or "Method,Path". The method decides which estimator runs and
 # where, so it is resolved once here rather than re-parsed at each use.
