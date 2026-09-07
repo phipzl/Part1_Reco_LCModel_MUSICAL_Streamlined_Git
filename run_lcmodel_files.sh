@@ -34,7 +34,7 @@ fi
 
 # The control files carry the absolute paths of the directory they were written
 # for. If the directory has moved since, point them at where it is now.
-first=$(find "$spectra" -maxdepth 1 -name '*.control' | head -1)
+first=$(find "$spectra" -maxdepth 1 -name '*.control' -print -quit)
 written_for=$(grep -m1 "^ FILRAW=" "$first" | sed "s/^ FILRAW='//; s|/spectra/[^/]*'\$||")
 if [[ -n $written_for && $written_for != "$out_path" ]]; then
     echo "The control files were written for $written_for, rewriting them for $out_path."
