@@ -72,6 +72,16 @@ if(~FastPIReprocess_flag)
 	end
     
 
+    % Test hook: reconstruct as if measured at another field strength. Used to check
+    % the phase roll with aliased lipids on 7 T data with a 10.5 T Larmor frequency.
+    TestLarmorHz = getenv('MRSI_TEST_LARMOR_HZ');
+    if(~isempty(TestLarmorHz))
+        csi.Par.LarmorFreq = str2double(TestLarmorHz);
+        if(isfield(csi,'RecoPar')); csi.RecoPar.LarmorFreq = csi.Par.LarmorFreq; end
+        if(isfield(Par,'CSI') && isfield(Par.CSI,'LarmorFreq')); Par.CSI.LarmorFreq = csi.Par.LarmorFreq; end
+        fprintf('\nMRSI_TEST_LARMOR_HZ: LarmorFreq set to %g Hz\n', csi.Par.LarmorFreq);
+    end
+
     % In case we are processing water data and it has no coilcompressscan, but the metabo scan has, then use the metabo scan
     if(IsWatRef && ( (~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan))) ...
                    || (isempty(image) || ~isfield(image,'Data')) )  )

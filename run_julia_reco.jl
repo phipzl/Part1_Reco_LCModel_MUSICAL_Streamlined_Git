@@ -32,6 +32,8 @@ using JSON
 using MAT
 using MRSI
 
+test_larmor = get(ENV, "MRSI_TEST_LARMOR_HZ", "")
+
 """Parse a gradient delay string like "[12.56, 12.54, 10.08]" into complex microseconds.
 The complex form "[12.42+10.27im, ...]" is also accepted."""
 function parse_gradient_delays(s::AbstractString)
@@ -103,7 +105,7 @@ function combined_csi_contents(csi_data, dat_file, recon_kw, patref_override=not
 
     contents["csi"]["RecoPar"] = Dict{String,Any}(
         "Dwelltimes" => float(online[:dwelltime]),            # ns, as combined_csi expects
-        "LarmorFreq" => float(online[:larmor_frequency]),
+        "LarmorFreq" => float(isempty(test_larmor) ? online[:larmor_frequency] : parse(Float64, test_larmor)),
         "FoV_Read" => float(online[:fov_readout]),
         "FoV_Partition" => float(online[:fov_slice]),
         "nFreqEnc_FinalMatrix" => float(size(csi_data, 1)),   # after reconstruction, not the encoded size
@@ -262,6 +264,13 @@ println("Julia: hamming=$hamming_flag, noise_decorrelation=$noisedecor_flag, lip
 println("Julia: mode=$parity_mode, gradient_delay_us=$(something(gradient_delay_us, "protocol")), " *
         "mmap=$mmap_val, zero_fill=$zero_fill_flag")
 
+# Test hooks for checking the phase roll against MATLAB: reconstruct as if
+# measured at another Larmor frequency, and switch the aliased-lipid handling off.
+test_kw = (;
+    (isempty(test_larmor) ? (;) : (; larmor_frequency=parse(Float64, test_larmor)))...,
+    (get(ENV, "MRSI_TEST_UNALIAS", "1") == "0" ? (; unalias_lipids=false) : (;))...,
+)
+
 # What Part1's own flags ask for, in both modes.
 common_kw = (
     datatype = ComplexF32,
@@ -271,6 +280,7 @@ common_kw = (
     lipid_decon = lipid_decon,
     zero_fill = zero_fill_flag,
     lipid_decon_kw...,
+    test_kw...,
 )
 
 # The settings MATLAB picks differently. Each one was measured against a
