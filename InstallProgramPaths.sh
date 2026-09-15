@@ -16,6 +16,8 @@
 # MATLAB
 export matlabp='/bilbo/usr/local/matlab2022a/bin/matlab'
 
+export WalinetDependencies_Path='/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/lab/WalinetDependencies/v1'
+
 # Brain extraction tool (bet)
 export betp='/usr/local/fsl/bin/bet'
 

@@ -11,7 +11,7 @@ run_matlab() {
         "$MatlabCompiledFunctions/$1" "$abs_tmp_dir"
     else
         # run the matlab script $1
-        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); $1('$abs_tmp_dir')\""
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); $1('$abs_tmp_dir')\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
@@ -30,7 +30,7 @@ run_mrsi_reconstruction() {
         "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1"
     else
         # run the matlab script $1
-        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi

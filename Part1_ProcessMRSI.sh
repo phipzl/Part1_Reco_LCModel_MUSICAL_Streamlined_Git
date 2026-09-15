@@ -161,7 +161,7 @@ export ZeroFillMetMaps_flag=0
 export InterpolateCSIResolution_flag=0
 export TimeInterpolation_flag=0
 export AlignFreq_flag=0
-export dont_compute_LCM_flag=0
+export SpectralFittingDontUseLCM_flag=0
 export LCM_ControlPath_flag=0
 export LCM_ControlPath_Water_flag=0
 export exponential_filter_Hz_flag=0
@@ -183,8 +183,9 @@ export phase_encoding_direction_is="AP"
 LipidDecon_MethodAndNoOfLoops="L1,10"
 export julia_n_threads="auto"
 export julia_mmap="false"
+SpectralFitting_Method="LCModel"
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKlu?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKl:u?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -192,16 +193,16 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         export csi_flag=1
         export csi_path="$OPTARG"
         ;;
-    b)
-        export basis_flag=1
-        export basis_path="$OPTARG"
-        ;;
     o)
         export out_flag=1
         export out_path="$OPTARG"
         ;;
 
     #optional
+    b)
+        export basis_flag=1
+        export basis_path="$OPTARG"
+        ;;
     a)
         export T1w_AntiNoise_flag=1
         export T1w_AntiNoise_path="$OPTARG"
@@ -272,7 +273,7 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         ;;
     n)
         export NuisRem_flag=1
-        export NuisRem_ControlPath="$OPTARG"
+        export NuisRem_MethodAndControlPath="$OPTARG"
         ;;
     p)
         export FLAIR_flag=1
@@ -339,8 +340,8 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     K)
         export compiled_matlab_flag=1
         ;;
-    l)
-        export dont_compute_LCM_flag=1
+    l)	export SpectralFittingDontUseLCM_flag=1
+        export SpectralFitting_Method="$OPTARG"	  
         ;;
     u)
         export use_phantom_flag=1
@@ -356,10 +357,10 @@ mandatory:
 -c  [csi file]          Format: DAT, DICOM, or .mat. If a .mat file is passed over, it is expected that everything is already performed like coil combination etc.
                         You can pass over several files of the same type by \'-c \"[csi_path1] [csi_path2] ...\"\'. These files get individually processed and averaged
                         at the end.
--b  [basis files]       Format: .BASIS. Used for LCM fitting (for FID)
 -o  [output directory]
 
 optional:
+-b  [basis files]       Format: .BASIS. Used for LCM fitting (for FID)
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
 -A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
@@ -393,7 +394,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
+-l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
 " $(basename $0) >&2
@@ -449,6 +450,7 @@ fi
 
 # read -rp "stop before create minc template"
 bash "$tmp_dir/CreateMincTemplates.sh"
+mnc2nii ${tmp_dir}/csi_template.mnc ${out_path}/maps/csi_template.nii; gzip --force ${out_path}/maps/csi_template.nii
 
 # read -rp "Stop before creating mask."
 ## 4.
@@ -484,20 +486,21 @@ echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, first run\n\n"
 if [[ $WaterReference_flag -eq 1 ]]; then
     echo -e "\nProcess water reference data for water scaling."
     echo -e "\n\nRunning:\n"
-    run_mrsi_reconstruction 1 0
+    run_mrsi_reconstruction 1 1
 fi
 echo -e "\n\n\n6. Process Data and Prepare LCModel Processing, second run\n\n"
 date
 # If we pass over several IMA or dat files, average them
 for ((CurAvg = 1; CurAvg <= NumberOfCSIFiles; CurAvg = CurAvg + 1)); do
-    run_mrsi_reconstruction $CurAvg 0
+    run_mrsi_reconstruction $CurAvg 1
 done
 
 # read -rp "Stop before LCModel fitting"
 #7.
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
+STARTLCM=$(date +%s.%N)
 echo -e "\n\n7. Start LCModel Processing\n\n"
-if [[ $dont_compute_LCM_flag -eq 0 ]]; then
+if [[ $SpectralFitting_Method == "LCModel" ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
 
@@ -521,6 +524,9 @@ if [[ $dont_compute_LCM_flag -eq 0 ]]; then
         rm -fR "$out_path/TempServerDir"
     fi
     sleep 10
+    ENDLCM=$(date +%s.%N)
+    DIFFLCM=$(echo "$ENDLCM - $STARTLCM" | bc)
+    echo -e "\n\n8. Total Processing time of LCModel: " $DIFFLCM "\n\n"
 fi
 
 # 8.
@@ -535,27 +541,46 @@ BaseNameMatlabFunctions=$(basename "$MatlabFunctionsFolder")
 
 # Archive this script itself
 cd ..
-tar --exclude='*/tmp*' --transform='s,^,/UsedSourcecode/,' -cf "$out_path/UsedSourcecode_Part1.tar" "$ScriptName"
+mkdir -p $out_path/UsedSourcecode
+rsync -a --exclude='model_*.pt' --exclude='test_data.mat' $ScriptName $out_path/UsedSourcecode/
+#tar --exclude='*/tmp*' --transform='s,^,/UsedSourcecode/,' -cf "$out_path/UsedSourcecode_Part1.tar" "$ScriptName"
 
 # Copy the logfile
+cd $tmp_dir
+cp "$logfile" "$out_path/UsedSourcecode/logfile_part1.log"
 cp "$logfile" "$out_path/logfile_part1.log"
 
 # Copy MeasurementInfos
-cp "$tmp_dir/MeasurementInfos.txt" "$out_path"
+cp "$tmp_dir/MeasurementInfos.txt" "$out_path/UsedSourcecode"
 
 # Archive the logfile
-cd "$tmp_dir" || exit
-tar f "$out_path/UsedSourcecode_Part1.tar" -r "$curlogname"
+#cd "$tmp_dir" || exit
+#tar f "$out_path/UsedSourcecode_Part1.tar" -r "$curlogname"
 
 # Archive the Matlab functions
 if ! [[ "$curdir/$BaseNameMatlabFunctions" == "$MatlabFunctionsFolder" ]]; then
-    cd "$MatlabFunctionsFolder" || exit
-    cd ..
-    tar f "$out_path/UsedSourcecode_Part1.tar" -r "$BaseNameMatlabFunctions" --transform='s,^,/UsedSourcecode/,'
+    #cd "$MatlabFunctionsFolder" || exit
+    #cd ..
+    cp -R "$MatlabFunctionsFolder" $out_path/UsedSourcecode/
+    #tar f "$out_path/UsedSourcecode_Part1.tar" -r "$BaseNameMatlabFunctions" --transform='s,^,/UsedSourcecode/,'
 fi
 
+# Remove unneccessary stuff
+rm -Rf $out_path/UsedSourcecode/Part1*/tmp*
+rm -f $out_path/UsedSourcecode/Part1*/Matlab_Functions/readNEW/kSpace.mat
+rm -Rf $out_path/UsedSourcecode/Part1*/Matlab_Functions/MatlabSourceCode_3rdParty/Lipid_Suppression_Toolbox/InVivo_Data
+rm -f $out_path/UsedSourcecode/Part1*/MatlabFunctions/readNEW/kSpace.mat
+rm -Rf $out_path/UsedSourcecode/Part1*/MatlabFunctions/MatlabSourceCode_3rdParty/Lipid_Suppression_Toolbox/InVivo_Data
+
+find $out_path/UsedSourcecode/ -type f -name '*.pdf' -delete
+find $out_path/UsedSourcecode/ -type f -name '*.zip' -delete
+find $out_path/UsedSourcecode/ -type f -name '*.mat' ! -name 'Bilgic_param_template.mat' ! -name 'ipeakdata.mat' -delete  ! -name 'basisset_met.mat' -delete
+
+
 # zip everything
-xz -z "$out_path/UsedSourcecode_Part1.tar"
+cd $out_path
+tar -cJf UsedSourcecode_Part1.tar.xz UsedSourcecode
+rm -Rf ./UsedSourcecode
 
 # Go back to the original folder
 cd "$curdir" || exit
@@ -569,6 +594,8 @@ if [[ $DebugFlag -eq 0 ]]; then
     echo -e "\n\n9. Remove unnecessary data!\n\n"
     find "$out_path" -name '*.RAW' -delete
     find "$out_path" -name '*.control' -delete
+    find "$out_path/water_spectra" -name '*.RAW' -delete
+    find "$out_path/water_spectra" -name '*.control' -delete
 fi
 
 #10: GH: finish time measurement

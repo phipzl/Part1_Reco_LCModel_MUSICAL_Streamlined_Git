@@ -1289,7 +1289,7 @@ end
 
 %% Nuisance Removal
 
-if(Par.Flags.NuisRem_flag == 1)
+if(Par.Flags.NuisRem_flag == 1 && contains(Par.Settings.NuisRem_Method,'HSVD','IgnoreCase',true))
     run ./NuisanceRemoval_HSVD.m
 end
 
@@ -1612,7 +1612,7 @@ end
     if(Par.Flags.WaterReference_flag)
 
         if(~exist([Par.Paths.out_path '/WaterReference.mat' ],'file') )
-
+            IsWatRef = true;
 
             % W1 & W2 --> If water does not exist yet, save it
             WaterReferenceCSI = csi;
@@ -1664,10 +1664,41 @@ if(~IsWatRef)		% No averaging for watref
 	end
 end
 
+
+%% WALINET water and lipid removal
+if(~IsWatRef && Par.Flags.NuisRem_flag == 1 && contains(Par.Settings.NuisRem_Method,'Walinet','IgnoreCase',true))
+    fprintf('\n\nApply WALINET');  
+   
+%     headmask = lipid_mask_BET | mask;
+
+%     Bak = csi; clear csi;
+%     csi = Bak.Data;
+    save([Par.Paths.out_path '/CombinedCSI_B0corrected_before_WALINET'], 'csi', 'mask','-v7.3'); %'headmask'
+    
+%     Par.Paths.NuisRem_Path = '/ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/bstrasser/Projects/Project9_ImplementRecoInICE/Step5_MultiCenterStudy/LargeData_d3hj/MeasAndLogData/Vienna/Vol5_Berni/meas_MID00025_FID27701_csi_fidesi_crt_Feb2025_2.dat';
+    DeepLCommand = sprintf('ssh lcm -t "source %s/venv_Walinet/bin/activate; python %s/DeepL_Walinet/infer_WALINET_all_CombinedCSI_7T_multicenter.py --dat_path %s --model_path %s/DeepL_Walinet/Model_7T_Final/model_best.pt --input %s/CombinedCSI_B0corrected_before_WALINET.mat --output %s/CombinedCSI_B0corrected_after_WALINET.mat;"',Par.Paths.WalinetDependencies_Path,pwd,Par.Paths.NuisRem_Path,pwd, Par.Paths.out_path,Par.Paths.out_path);
+    fprintf('\nRunning the following command for WALINET:\n%s\n\n',DeepLCommand)
+    [bla,bla2] = unix(DeepLCommand);
+    fprintf('\nFinished with the following message:\n%s\n\n',bla2)
+
+
+    Tmp = load([Par.Paths.out_path '/CombinedCSI_B0corrected_after_WALINET.mat']);
+    csi = Tmp.csi;
+    clear Tmp
+
+    csi.Data = single(csi.Data);
+
+
+    delete([Par.Paths.out_path '/CombinedCSI_B0corrected_before_WALINET.mat'])
+    delete([Par.Paths.out_path '/CombinedCSI_B0corrected_after_WALINET.mat'])
+
+end
+
+
 %% Write the files necessary for LCM-processing
 
 % Dont do for W1-WatRef
-if( IsW2WatRef || (~IsWatRef && IsLastAvg) )  % i.e. either we have W2-Watref, or no Watref and last Avg
+if(contains(Par.Settings.SpectralFitting_Method,'LCModel') && (IsW2WatRef || (~IsWatRef && IsLastAvg)) )  % i.e. either we have W2-Watref, or no Watref and last Avg
 
 	display([ char(10) char(10) 'WRITE LCM-FILES'])
 
@@ -1706,12 +1737,193 @@ end
 
 %% Save the processed MRSI data for SNR-Computation after LCModel processing
 
-fprintf('\n\nThe MRSI Pre-Processing and LCModel preparations took %10.6f s.\n',toc(CoilCombtic))
-clearvars -except Par csi weights image image_FullFID image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef NoiseCorrMatStruct NoiseData
+fprintf('\n\nThe MRSI Pre-Processing and Fitting preparations took %10.6f s.\n',toc(CoilCombtic))
+clearvars -except Par csi weights image image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef NoiseCorrMatStruct
 
+csi.Data = single(csi.Data);
+if(isfield(csi,'NoiseData'))
+    csi.NoiseData = single(csi.NoiseData);
+end
+mask=single(mask);
+tic;
 if(~IsWatRef)		% No need to save water reference
 	save([Par.Paths.out_path '/CombinedCSI.mat'], '-v7.3')
 end
+fprintf('\n\nThe saving of MRSI data took %10.6f s.\n',toc)
+
+
+
+%%
+if(contains(Par.Settings.SpectralFitting_Method,'DeepLearning'))
+
+
+    DeepLTiccy = tic;
+
+    maxi = max(abs(csi.Data(:)));
+    NoOfZeros = sum(csi.Data(:)==0);
+    csi.Data(csi.Data==0) = maxi*1E-5*(randn([NoOfZeros 1])+1i*randn([NoOfZeros 1])); %% THIS IS FOR AARON DL FITTING
+    clear maxi NoOfZeros
+    
+
+%     Normy = norm(csi(:));
+%     fac = 1;%2.951e-14;
+%     csi = csi * fac / Normy;
+
+    mapspathy=[Par.Paths.out_path  '/maps/Orig'];
+    mkdir(mapspathy);
+    csipathy=[Par.Paths.out_path  '/CombinedCSI.mat'];
+    tmp2=pwd;
+    
+    
+    
+    %%DL FITTING + MAPPING
+    %model is currently ins aaron's folder
+    DeepLCommand = sprintf('ssh lcm -t "source /ceph/mri.meduniwien.ac.at/departments/radiology/mrsbrain/home/aosburg/venv/bin/activate; python %s/DeepL_Fitting/inference_walinet.py --input %s --output %s;"',tmp2,csipathy,mapspathy);
+    fprintf('\nRunning the following command for Deep Learning Fitting:\n%s\n\n',DeepLCommand)
+    [bla,bla2] = unix(DeepLCommand);
+    
+    
+    if(exist([mapspathy '/../csi_template.nii.gz'],'file'))
+        refFileNifti = load_untouch_nii([mapspathy '/../csi_template.nii.gz']);
+    else
+        refFileNifti = load_untouch_nii([mapspathy '/../csi_template.nii']);
+    end
+
+    SummingMaps = {'NAA','NAAG';'Cr','PCr';'GPC','PCh';'Glu','Gln'};
+    SummingNames = {'NAA+NAAG';'Cr+PCr';'GPC+PCh';'Glu+Gln'};
+
+    for ii = 1:size(SummingMaps,1)
+        for jj = 1:size(SummingMaps,2)
+            TmpMap = load_untouch_nii([mapspathy '/' SummingMaps{ii,jj} '_amp_map.nii']);
+            TmpRatioMap = load_untouch_nii([mapspathy '/' SummingMaps{ii,jj} '_tCr_amp_map.nii']);
+            if(jj == 1)
+                TmpSumMap = TmpMap;
+                TmpRatioSumMap = TmpRatioMap;
+            else
+                TmpSumMap.img = TmpSumMap.img + TmpMap.img;
+                TmpRatioSumMap.img = TmpRatioSumMap.img + TmpRatioMap.img;
+            end
+        end
+        if(~strcmp(SummingNames{ii},'tCr'))
+            save_untouch_nii(TmpRatioSumMap,[mapspathy '/' SummingNames{ii} '_tCr_amp_map.nii']);
+        end
+        save_untouch_nii(TmpSumMap,[mapspathy '/' SummingNames{ii} '_amp_map.nii']);
+    end
+
+    filees = dir([mapspathy '/*.nii']);
+    filees = {filees.name};
+
+    for CurFileNo = 1:numel(filees)
+        CurFile = filees{CurFileNo};
+        CurFile = strcat(mapspathy,'/',CurFile);
+        outFile = CurFile;
+    %     outFile = strrep(CurFile,'.nii','.nii');
+        if(strcmp(CurFile,'csi_template.nii'))
+            continue;
+        end
+    
+        srcFileNifti = load_untouch_nii(CurFile);
+
+        % Spectra Files
+        if(contains(CurFile,'input_spectra.nii') || contains(CurFile,'reconstructions.nii') )
+
+            if(contains(CurFile,'input_spectra.nii'))
+                outFile = strrep(outFile,'input_spectra.nii','../SpecMap_DeepLInput_real.nii');
+            else
+                outFile = strrep(outFile,'reconstructions.nii','../SpecMap_DeepLFit_real.nii');
+            end
+
+            configjason = io_ReadJsonFile('./DeepL_Fitting/config.json');
+            outFileNifti = srcFileNifti;
+    
+            SizeOutNifti = size(srcFileNifti.img);
+    
+    
+            % Header
+            outFileNifti.hdr.dime.dim = cat(2,2, SizeOutNifti, [1 1 1 1 1]);
+            outFileNifti.hdr.dime.pixdim = refFileNifti.hdr.dime.pixdim;
+            outFileNifti.hdr.hist = refFileNifti.hdr.hist;
+            outFileNifti.hdr.dime.dim(1) = 4;
+            outFileNifti.hdr.dime.datatype = 16;
+            outFileNifti.hdr.dime.bitpix = 32;
+            outFileNifti.hdr.dime.toffset = max(configjason.preprocessor_config.ppm_bounds);
+            outFileNifti.hdr.dime.pixdim(5) = -abs(diff(configjason.preprocessor_config.ppm_bounds))/(SizeOutNifti(end)-1);
+            outFileNifti.hdr.dime.scl_slope = 1; %0.193
+            outFileNifti.hdr.dime.scl_inter = 0;
+    
+            
+            % Flip data etc
+            outFileNifti.img = flip(outFileNifti.img,4);
+            outFileNifti.img = flip(flip(outFileNifti.img,1),2);
+            outFileNifti.img = 1000*outFileNifti.img;
+            outFileNifti.img = single(outFileNifti.img);
+           
+            % Imaginary Part
+            outFileNifti_imag = outFileNifti;
+            outFileNifti_imag.img = imag(outFileNifti_imag.img);
+            outFileNifti_imag.hdr.dime.glmax = max(outFileNifti_imag.img);
+            outFileNifti_imag.hdr.dime.glmin = min(outFileNifti_imag.img);
+    
+            % Real Part
+            outFileNifti.img = real(outFileNifti.img);
+            outFileNifti.hdr.dime.glmax = max(real(outFileNifti.img));
+            outFileNifti.hdr.dime.glmin = min(real(outFileNifti.img));
+
+
+            % Save Files
+            outFileNifti.fileprefix = outFile;
+            save_untouch_nii(outFileNifti,outFile);
+            unix(['gzip --force ' outFile]);
+
+            outFile = strrep(outFile,'_real.nii','_imag.nii');
+            outFileNifti_imag.fileprefix = outFile;
+            save_untouch_nii(outFileNifti_imag,outFile);
+            unix(['gzip --force ' outFile]);
+
+            % Remove original file
+            unix(['rm -f ' CurFile]);
+
+            
+        % Normal Maps
+        else
+
+            outFileNifti = refFileNifti;
+            outFileNifti.img = srcFileNifti.img;
+        
+            outFileNifti.hdr.dime.scl_slope = 1; %0.193
+            outFileNifti.hdr.dime.scl_inter = 0;
+           
+            outFileNifti.img = flip(flip(outFileNifti.img,1),2);
+            outFileNifti.img = 1000*outFileNifti.img;
+       
+            outFileNifti.fileprefix = CurFile;
+        
+            outFile2 = strrep(outFile,'_crlb_amp_map.nii','_crlb_sd_map.nii');
+
+            save_untouch_nii(outFileNifti,outFile2);
+        
+            % Create Minc files... But who wants them?
+%             outFileMnc = strrep(outFile2,'.nii','.mnc');
+%             [bla,bla2] = unix(['nii2mnc -quiet ' outFile2 ' ' outFileMnc]);
+
+            unix(['gzip --force ' outFile2]);
+            if(exist(outFile,'file'))
+                unix(['rm -f ' outFile]);
+            end
+
+        end
+    
+    end
+    
+    
+    
+    %% Clean up
+    
+    fprintf('\n\nThe Deep Learning fitting took took %10.6f s.\n',toc(DeepLTiccy))
+
+
+end
+
 
 
 end
