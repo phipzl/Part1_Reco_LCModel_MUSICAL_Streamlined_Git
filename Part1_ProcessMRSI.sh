@@ -169,7 +169,6 @@ export control_echo_flag=0
 export basis_echo_flag=0
 export XPACE_motion_correction_flag=0
 export julia_reconstruction=0
-export deep_learning_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
 export compiled_matlab_flag="${compiled_matlab_flag:-0}"
@@ -186,7 +185,7 @@ export julia_n_threads="auto"
 export julia_mmap="false"
 SpectralFitting_Method="LCModel"
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKl:Q:u?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKl:u?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -346,10 +345,6 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     l)	export SpectralFittingDontUseLCM_flag=1
         export SpectralFitting_Method="$OPTARG"	  
         ;;
-    Q)
-        export deep_learning_flag=1
-        export deep_learning_fitting="$OPTARG"
-        ;;
     d)
         DebugFlag=1
         ;;
@@ -404,8 +399,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed.
--Q  [dlfit|gpufit]  Fit with the deepmrsi fitters instead of LCModel, maps as NIfTI in [output directory]/deepMRSI. gpufit is SpatialRegu. Not together with -l.
+-l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed. With -S also \"PHIVE\", \"SpatialRegu\" or \"Both\", the fitters of the online FIRE route, maps as NIfTI in [output directory]/deepMRSI.
 -d  Debug: keep the temporary directory and the LCModel input files.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -513,9 +507,8 @@ done
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 STARTLCM=$(date +%s.%N)
 echo -e "\n\n7. Start LCModel Processing\n\n"
-if [[ $deep_learning_flag -eq 1 ]]; then
-    run_deepmrsi_fit
-elif [[ $SpectralFitting_Method == "LCModel" ]]; then
+[[ -n $(deepmrsi_fitting) ]] && run_deepmrsi_fit
+if [[ $SpectralFitting_Method == "LCModel" ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
 

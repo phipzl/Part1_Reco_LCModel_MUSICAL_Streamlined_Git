@@ -1,7 +1,7 @@
 #!/bin/bash
 # The Julia reconstruction (-S), WALRUS through -L "WALRUS,<model>", the field
-# correction -A Patref and the deepmrsi fitters (-Q). Sourced by run_matlab.sh,
-# which calls into it only when one of these options is given.
+# correction -A Patref and the deepmrsi fitters (-l PHIVE, SpatialRegu or Both).
+# Sourced by run_matlab.sh, which calls into it only when one of these is given.
 
 # Stop the whole pipeline when a step fails, so the exit code reports it.
 # Argument $1: name of the step that failed.
@@ -21,22 +21,18 @@ matlab_step_failed() {
 check_julia_deepmrsi_options() {
     # -l takes a method, so a bare -l takes the next option as its method.
     if [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]] && [[ $SpectralFitting_Method == -* ]]; then
-        echo "-l needs a method (LCModel, DeepLearning or None), got '$SpectralFitting_Method'."
+        echo "-l needs a method (LCModel, DeepLearning, None, PHIVE, SpatialRegu or Both), got '$SpectralFitting_Method'."
         matlab_step_failed "-l"
     fi
-    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
-        case "$deep_learning_fitting" in
-            dlfit | gpufit | off) ;;
+    # On -S an unknown method would reconstruct and then fit nothing.
+    if [[ $julia_reconstruction -eq 1 ]] && [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]]; then
+        case "${SpectralFitting_Method,,}" in
+            lcmodel | deeplearning | none | phive | spatialregu | both) ;;
             *)
-                echo "-Q needs a fitter (dlfit, gpufit or off), got '$deep_learning_fitting'."
-                matlab_step_failed "-Q"
+                echo "-l takes LCModel, None, PHIVE, SpatialRegu or Both, got '$SpectralFitting_Method'."
+                matlab_step_failed "-l"
                 ;;
         esac
-        # Both choose the fitting, and together two fitters would run.
-        if [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]]; then
-            echo "-Q and -l both choose the spectral fitting. Give one of them."
-            matlab_step_failed "-Q"
-        fi
     fi
     if [[ $julia_reconstruction -ne 1 ]]; then
         refuse_julia_only_options
@@ -53,6 +49,16 @@ walrus_lipid_decon_model() {
     local Rest=${LipidDecon_MethodAndNoOfLoops#*,}
     [[ $Rest == "$LipidDecon_MethodAndNoOfLoops" ]] && Rest=""
     echo "$Rest"
+}
+
+# The deepmrsi fitter for -l, by the names the online FIRE route uses; empty for
+# the other methods.
+deepmrsi_fitting() {
+    case "${SpectralFitting_Method,,}" in
+        phive) echo dlfit ;;
+        spatialregu) echo gpufit ;;
+        both) echo both ;;
+    esac
 }
 
 patref_is_the_alignment() {
@@ -223,9 +229,9 @@ refuse_julia_only_options() {
     fi
     # The MATLAB reconstruction does not keep the reference scan in CombinedCSI.mat,
     # which deepmrsi needs.
-    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
-        echo -e "\n-Q is implemented for the Julia reconstruction (-S) only."
-        matlab_step_failed "-Q"
+    if [[ -n $(deepmrsi_fitting) ]]; then
+        echo -e "\n-l $SpectralFitting_Method is implemented for the Julia reconstruction (-S) only."
+        matlab_step_failed "-l $SpectralFitting_Method"
     fi
 }
 
@@ -240,7 +246,7 @@ run_julia_reconstruction() {
     [[ $FirstOrderPhaseCorr_flag -eq 1 ]] && OnlyInMatlab+=("-F (first order phase correction)")
     [[ $FirstOrderPhaseModulation_flag -eq 1 ]] && OnlyInMatlab+=("-k (first order phase modulation)")
     [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal, including Walinet; use -L WALRUS)")
-    [[ $SpectralFitting_Method == *DeepLearning* ]] && OnlyInMatlab+=("-l DeepLearning (use -Q dlfit)")
+    [[ $SpectralFitting_Method == *DeepLearning* ]] && OnlyInMatlab+=("-l DeepLearning (use -l PHIVE)")
 
     if [[ ${#OnlyInMatlab[@]} -gt 0 ]]; then
         echo -e "\nThe Julia reconstruction does not implement:"
@@ -249,8 +255,8 @@ run_julia_reconstruction() {
         done
         return 1
     fi
-    # -Q fits CombinedCSI.mat itself, so the LCModel files are written for LCModel only.
-    if [[ ${deep_learning_flag:-0} -ne 1 ]] && ! julia_lcm_writer_available; then
+    # The deepmrsi fitters read CombinedCSI.mat itself and need no LCModel files.
+    if [[ -z $(deepmrsi_fitting) ]] && ! julia_lcm_writer_available; then
         echo -e "\nThe Julia output cannot be used, julia_write_lcm_files was not found."
         return 1
     fi
@@ -322,7 +328,7 @@ run_julia_reconstruction() {
         "$Python" "$ScriptDir/walrus_clean_csi.py" "$abs_tmp_dir" "$WalrusModel" || matlab_step_failed walrus_clean_csi.py
     fi
 
-    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
+    if [[ -n $(deepmrsi_fitting) ]]; then
         return 0
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then
@@ -346,12 +352,13 @@ run_julia_reconstruction_or_stop() {
     matlab_step_failed "the Julia reconstruction"
 }
 
-# -Q: fit with deepmrsi instead of LCModel, maps as NIfTI in <out>/deepMRSI.
+# -l PHIVE, SpatialRegu or Both: fit with deepmrsi instead of LCModel, maps as NIfTI
+# in <out>/deepMRSI.
 run_deepmrsi_fit() {
     local OutDir="$out_path/deepMRSI" Options=() Python ScriptDir
     mkdir -p "$OutDir"
     write_initial_parameters_json
-    [[ -n $deep_learning_fitting ]] && Options+=(--fitting "$deep_learning_fitting")
+    Options+=(--fitting "$(deepmrsi_fitting)")
     # WALRUS is reached through -L, which runs it on the reconstruction before this
     # step, so deepmrsi's own removal stays off.
     Options+=(--walrus_model off)

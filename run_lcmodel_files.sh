@@ -5,7 +5,7 @@
 #
 # Part1 writes one .RAW and one .control per voxel into <output directory>/spectra
 # and keeps them when run with -d. This fits them the way step 7 does, so a run
-# made with -l or -Q can be completed with LCModel afterwards and Part2 has its
+# made with -l None can be completed with LCModel afterwards and Part2 has its
 # tables. The directory may have been copied or moved since: the control files
 # name the directory they were written for, and are rewritten when it differs.
 set -euo pipefail

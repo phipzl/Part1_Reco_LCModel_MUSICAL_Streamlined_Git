@@ -2,7 +2,7 @@
 """
 run_deepmrsi.py: bridge between the MRSI pipeline and the deepmrsi quantification.
 
-Called from step 7 of Part1_ProcessMRSI.sh when the -Q flag is set:
+Called from step 7 of Part1_ProcessMRSI.sh for -l PHIVE, SpatialRegu or Both:
     python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walrus_model Y]
 
 Takes its input from whichever the reconstruction left behind:
@@ -27,7 +27,7 @@ import processing_record
 parser = argparse.ArgumentParser(description="Quantify the reconstructed MRSI data with deepmrsi.")
 parser.add_argument("tmp_dir", help="temporary directory of the current run")
 parser.add_argument("output_dir", help="directory the metabolic maps are written to")
-parser.add_argument("--fitting", choices=("dlfit", "gpufit", "off"), default=None,
+parser.add_argument("--fitting", choices=("dlfit", "gpufit", "both", "off"), default=None,
                     help="fitting backend, deepmrsi decides if it is not given")
 # The names come from walrus itself rather than a copy here, which is how this
 # list fell behind: it still offered legacy_7T/final_7T/final_3T after they were
