@@ -353,7 +353,7 @@ for Addon in _brain _brain_zf _lipid _brain_BefInterpol _lipid_BefInterpol; do
 	CurMaskOut=$(echo $CurMask | sed 's/_brain//g');
 	if [[ -f ${tmp_dir}/${CurMask}.mnc ]]; then
 		cp ${tmp_dir}/${CurMask}.mnc ${out_path}/maps/${CurMaskOut}.mnc
-		cp ${tmp_dir}/${CurMask}.raw ${out_path}/maps/${CurMaskOut}.taw
+		cp ${tmp_dir}/${CurMask}.raw ${out_path}/maps/${CurMaskOut}.raw
 		mnc2nii ${tmp_dir}/${CurMask}.mnc ${out_path}/maps/${CurMaskOut}.nii; gzip ${out_path}/maps/${CurMaskOut}.nii -f
 	fi
 done
