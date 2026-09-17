@@ -3,7 +3,7 @@
 run_deepmrsi.py: bridge between the MRSI pipeline and the deepmrsi quantification.
 
 Called from step 7 of Part1_ProcessMRSI.sh when the -Q flag is set:
-    python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walinet_model Y]
+    python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walrus_model Y]
 
 Takes its input from whichever the reconstruction left behind:
 
@@ -29,16 +29,23 @@ parser.add_argument("tmp_dir", help="temporary directory of the current run")
 parser.add_argument("output_dir", help="directory the metabolic maps are written to")
 parser.add_argument("--fitting", choices=("dlfit", "gpufit", "off"), default=None,
                     help="fitting backend, deepmrsi decides if it is not given")
-# The names come from walinet itself rather than a copy here, which is how this
+# The names come from walrus itself rather than a copy here, which is how this
 # list fell behind: it still offered legacy_7T/final_7T/final_3T after they were
 # renamed, so the 7T and 3T that Part1's own usage text documents were rejected.
+# Images built before the package was renamed from walinet take the old info keys.
 try:
-    from walinet.package_config import MODEL_CHOICES as WALINET_MODEL_CHOICES
+    from walrus.package_config import MODEL_CHOICES as WALRUS_MODEL_CHOICES
+    WALRUS_KEY = "walrus"
 except ImportError:
-    WALINET_MODEL_CHOICES = None
+    try:
+        from walinet.package_config import MODEL_CHOICES as WALRUS_MODEL_CHOICES
+    except ImportError:
+        WALRUS_MODEL_CHOICES = None
+    WALRUS_KEY = "walinet"
 
-parser.add_argument("--walinet_model", choices=WALINET_MODEL_CHOICES, default=None,
-                    help="WALINET model for the lipid suppression, deepmrsi decides if it is not given")
+parser.add_argument("--walrus_model", "--walinet_model", dest="walrus_model",
+                    choices=WALRUS_MODEL_CHOICES, default=None,
+                    help="WALRUS model for the water and lipid removal, deepmrsi decides if it is not given")
 parser.add_argument("--b0_correction", choices=("true", "false"), default=None,
                     help="correct the field shift before fitting; Part1 passes -0 through here. "
                          "Ignored when the reconstruction already carries the correction")
@@ -182,23 +189,29 @@ print(f"run_deepmrsi: fid shape = {fid.shape}")
 print(f"run_deepmrsi: patref shape = {patref.shape}")
 
 # Optional settings that deepmrsi understands, only passed on if they are there
-for key in ("bet_f", "bet_g", "walinet", "walinet_model", "fitting",
+for key in ("bet_f", "bet_g", "fitting",
             "lipidSuppression_beta", "use_prescan_for_masking",
             "writeWithoutSuppression", "makehomogeneous_sigma", "b0_correction"):
     if key in meta:
         info[key] = meta[key]
+# Under whichever name the metadata uses, passed on under the one deepmrsi reads
+for new, old in (("walrus", "walinet"), ("walrus_model", "walinet_model")):
+    for key in (new, old):
+        if key in meta:
+            info[new.replace("walrus", WALRUS_KEY)] = meta[key]
+            break
 
 # The command line wins over the metadata. If neither sets them, deepmrsi keeps
 # its own defaults.
 if args.fitting is not None:
     info["fitting"] = args.fitting
-if args.walinet_model is not None:
-    info["walinet_model"] = args.walinet_model
+if args.walrus_model is not None:
+    info[WALRUS_KEY + "_model"] = args.walrus_model
 if args.b0_correction is not None:
     info["b0_correction"] = args.b0_correction == "true"
 
 # A step between the reconstruction and here may already have corrected the
-# field: the WALINET removal does, because its model is trained on corrected
+# field: the WALRUS removal does, because its model is trained on corrected
 # data. deepmrsi is told so and skips its own correction rather than shifting
 # the FIDs a second time, and the fitter still learns the input is corrected.
 # Only for the file that was actually read: the record describes CombinedCSI.mat
@@ -250,7 +263,7 @@ print(f"run_deepmrsi: calling process_deep_mrsi_offline, output to {output_dir}"
 print(f"  dwelltime={info['dwelltime']} ms, larmor_frequency={info['larmor_frequency']} Hz")
 print(f"  inplane_res={info['inplane_res']} mm, fov_slice={info['fov_slice']} mm")
 print(f"  fitting={info.get('fitting', 'deepmrsi default')}, "
-      f"walinet_model={info.get('walinet_model', 'deepmrsi default')}")
+      f"walrus_model={info.get(WALRUS_KEY + '_model', 'deepmrsi default')}")
 print(f"  b0_correction={info.get('b0_correction', 'deepmrsi default')}, "
       f"input already corrected={info.get('b0_corrected', False)}")
 

@@ -376,7 +376,7 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:t:T:v:w:W:X:z
         export deep_learning_flag=1
         # The fitting backend is an optional argument of -Q. Same rule as for -S:
         # only take the next word if it exists and is not the next option.
-        # WALINET is not selected here. It is a lipid decontamination method and
+        # WALRUS is not selected here. It is a lipid decontamination method and
         # belongs to -L, so that the fitter fits whatever it is handed.
         NextArg=""
         [[ $OPTIND -le $# ]] && NextArg=${!OPTIND}
@@ -410,7 +410,7 @@ mandatory:
 
 optional:
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
--A  [\"Patref\" Or \"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment. \"Patref\" derives the field map from the reference scan the way the online FIRE route does, needs no second acquisition, and is the only method the Julia reconstruction (-S) implements; it is also applied before a \"WALINET\" removal, whose model expects corrected data. The other methods run inside the MATLAB reconstruction and are either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
+-A  [\"Patref\" Or \"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment. \"Patref\" derives the field map from the reference scan the way the online FIRE route does, needs no second acquisition, and is the only method the Julia reconstruction (-S) implements; it is also applied before a \"WALRUS\" removal, whose model expects corrected data. The other methods run inside the MATLAB reconstruction and are either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
 -D  [DebugAdditionalInput]  A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
 -e  [LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
@@ -423,7 +423,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALINET,[model]\" for the neural network removal of water and lipids, where [model] is a WALINET model such as 7T or 3T and may be left off to take its default. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-L  [LipidRegMethod,RegTerm]    Perform lipid decontamination. Use \"WALRUS,[model]\" for the neural network removal of water and lipids, where [model] is a WALRUS model such as 7T or 3T and may be left off to take its default. WALINET is accepted as its old name. The regularization after Bilgic et al. is \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m is not set, an anatomical given with -t is masked with \"bet,-f 0.33 -g 0\"; without -t no mask is used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -442,7 +442,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--Q  {fitting}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\"; without it the deepmrsi default is used. This selects the fitter only. WALINET is a lipid decontamination method and is requested through -L, which runs it on the reconstruction before the fitting, so -L \"WALINET,7T\" -Q gpufit fits WALINET-cleaned spectra.
+-Q  {fitting}    Fit the spectra with the deep learning quantification (deepmrsi) instead of LCModel. The metabolic maps are written as NIfTI to [output directory]/deepMRSI. [fitting] can be \"dlfit\", \"gpufit\" or \"off\"; without it the deepmrsi default is used. This selects the fitter only. WALRUS is a lipid decontamination method and is requested through -L, which runs it on the reconstruction before the fitting, so -L \"WALRUS,7T\" -Q gpufit fits WALRUS-cleaned spectra.
 -l  If this option is set, LCModel is not started, everything else is done normally. Useful for only computing the SNR.
 -d  Debug: keep the temporary directory, and keep the LCModel input files (the .RAW and .control per voxel in [output directory]/spectra) instead of deleting them at the end. Together with -l this leaves a finished reconstruction that LCModel can be run on later with run_lcmodel_files.sh, so several fitters can be compared on one reconstruction.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
@@ -614,12 +614,12 @@ if [[ $deep_learning_flag -eq 1 ]]; then
     if [[ -n $deep_learning_fitting ]]; then
         DeepLearningOptions+=(--fitting "$deep_learning_fitting")
     fi
-    # Always off. WALINET is reached through -L, which runs it on the
+    # Always off. WALRUS is reached through -L, which runs it on the
     # reconstruction before this step, so leaving deepmrsi's own removal enabled
     # would take out water and lipids a second time and report nothing.
-    DeepLearningOptions+=(--walinet_model off)
+    DeepLearningOptions+=(--walrus_model off)
     # -0 asks for the field correction and reaches deepmrsi here. Where it
-    # actually happens is decided further down: the WALINET step corrects the
+    # actually happens is decided further down: the WALRUS step corrects the
     # reconstruction in place when it runs, and run_deepmrsi.py reads that from
     # the record beside the file rather than correcting a second time.
     #

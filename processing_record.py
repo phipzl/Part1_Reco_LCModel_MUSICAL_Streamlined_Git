@@ -2,7 +2,7 @@
 """What has already been applied to a reconstructed CombinedCSI.mat.
 
 Steps after the reconstruction read the same file, and one of them correcting
-the field shift is invisible to the next. walinet_clean_csi.py writes this
+the field shift is invisible to the next. walrus_clean_csi.py writes this
 record and run_deepmrsi.py reads it, so the correction is applied once however
 many stages the configuration chains together.
 

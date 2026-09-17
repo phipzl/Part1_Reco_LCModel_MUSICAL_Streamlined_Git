@@ -8,7 +8,7 @@ from the phase evolution across the uncombined PATREFSCAN, so it needs no second
 acquisition. MRSI_Reconstruction.m runs the same estimator inside the MATLAB
 reconstruction; here it runs on the reconstruction the Julia route produced,
 which is the equivalent point in the chain and, like MATLAB's, is before
-anything downstream reads the file. A WALINET removal in particular expects
+anything downstream reads the file. A WALRUS removal in particular expects
 corrected data, because its model was trained on it.
 
 Reads  <out_path>/CombinedCSI.mat   csi.Data and image_FullFID.Data

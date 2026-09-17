@@ -219,9 +219,10 @@ if get(p, "LipidDecon_flag", 0) == 1
     spec = split(get(p, "LipidDecon_MethodAndNoOfLoops", "L2,10"), ',')
     method = uppercase(spec[1])
     value = length(spec) > 1 ? tryparse(Float64, spec[2]) : nothing
-    # WALINET is the alternative to the regularization, not an addition to it. It
-    # runs after the reconstruction, in walinet_clean_csi.py, so nothing happens here.
-    lipid_decon = method == "WALINET" ? nothing : method == "L1" ? :L1 : :L2
+    # WALRUS (formerly WALINET) is the alternative to the regularization, not an
+    # addition to it. It runs after the reconstruction, in walrus_clean_csi.py, so
+    # nothing happens here.
+    lipid_decon = method in ("WALRUS", "WALINET") ? nothing : method == "L1" ? :L1 : :L2
 
     if lipid_decon == :L1 && !isnothing(value)
         # An iteration count means the same thing on both sides.

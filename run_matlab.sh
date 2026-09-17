@@ -47,16 +47,16 @@ julia_lcm_writer_available() {
     [[ -n $(find -L "$MatlabFunctionsFolder" -name julia_write_lcm_files.m -print -quit 2>/dev/null) ]]
 }
 
-# WALINET is a lipid decontamination method, an alternative to the L1 and L2
-# regularization rather than a step of its own: -L "WALINET,<model>". The model is
-# optional; without it WALINET uses its configured default.
-walinet_is_the_lipid_decon() {
+# WALRUS is a lipid decontamination method, an alternative to the L1 and L2
+# regularization rather than a step of its own: -L "WALRUS,<model>". The model is
+# optional; without it WALRUS uses its configured default. WALINET is its old name.
+walrus_is_the_lipid_decon() {
     [[ $LipidDecon_flag -eq 1 ]] || return 1
     local Method=${LipidDecon_MethodAndNoOfLoops%%,*}
-    [[ ${Method^^} == "WALINET" ]]
+    [[ ${Method^^} == "WALRUS" || ${Method^^} == "WALINET" ]]
 }
 
-walinet_lipid_decon_model() {
+walrus_lipid_decon_model() {
     local Rest=${LipidDecon_MethodAndNoOfLoops#*,}
     [[ $Rest == "$LipidDecon_MethodAndNoOfLoops" ]] && Rest=""
     echo "$Rest"
@@ -131,21 +131,21 @@ run_julia_reconstruction() {
         fi
     fi
 
-    if walinet_is_the_lipid_decon; then
-        local WalinetPython WalinetModel
-        WalinetPython=$(command -v python3 || command -v python)
-        WalinetModel=$(walinet_lipid_decon_model)
-        if [[ -z $WalinetPython ]]; then
-            echo -e "\nNeither python3 nor python was found, cannot run the WALINET lipid decontamination."
+    if walrus_is_the_lipid_decon; then
+        local WalrusPython WalrusModel
+        WalrusPython=$(command -v python3 || command -v python)
+        WalrusModel=$(walrus_lipid_decon_model)
+        if [[ -z $WalrusPython ]]; then
+            echo -e "\nNeither python3 nor python was found, cannot run the WALRUS lipid decontamination."
             return 1
         fi
-        echo -e "\nRun this command: $WalinetPython $ScriptDir/walinet_clean_csi.py $abs_tmp_dir $WalinetModel"
-        if ! "$WalinetPython" "$ScriptDir/walinet_clean_csi.py" "$abs_tmp_dir" "$WalinetModel"; then
+        echo -e "\nRun this command: $WalrusPython $ScriptDir/walrus_clean_csi.py $abs_tmp_dir $WalrusModel"
+        if ! "$WalrusPython" "$ScriptDir/walrus_clean_csi.py" "$abs_tmp_dir" "$WalrusModel"; then
             # Deliberately not "return 1". That falls back to the MATLAB
             # reconstruction, which would fit uncleaned spectra and report success
             # for a run that asked for the removal.
-            echo -e "\nwalinet_clean_csi.py failed, stopping."
-            declare -f matlab_step_failed >/dev/null && matlab_step_failed walinet_clean_csi.py
+            echo -e "\nwalrus_clean_csi.py failed, stopping."
+            declare -f matlab_step_failed >/dev/null && matlab_step_failed walrus_clean_csi.py
             exit 1
         fi
     fi
@@ -201,11 +201,11 @@ run_mrsi_reconstruction() {
         echo "    reconstruction deliberately."
         matlab_step_failed "the Julia reconstruction"
     fi
-    # WALINET decontaminates the Julia output; the MATLAB reconstruction has no
+    # WALRUS decontaminates the Julia output; the MATLAB reconstruction has no
     # equivalent, so reconstructing without it would drop the requested step.
-    if walinet_is_the_lipid_decon; then
-        echo -e "\nWALINET lipid decontamination is implemented for the Julia reconstruction (-S) only."
-        declare -f matlab_step_failed >/dev/null && matlab_step_failed "WALINET lipid decontamination"
+    if walrus_is_the_lipid_decon; then
+        echo -e "\nWALRUS lipid decontamination is implemented for the Julia reconstruction (-S) only."
+        declare -f matlab_step_failed >/dev/null && matlab_step_failed "WALRUS lipid decontamination"
         exit 1
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then

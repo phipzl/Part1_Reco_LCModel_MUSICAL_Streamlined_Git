@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Remove water and lipids from a reconstructed CSI, for LCModel to fit.
 
-    python walinet_clean_csi.py <tmp_dir> <model>
+    python walrus_clean_csi.py <tmp_dir> <model>
 
-WALINET normally sits inside the deepmrsi quantification, which fits with dlfit or
+WALRUS normally sits inside the deepmrsi quantification, which fits with dlfit or
 gpufit and replaces LCModel. This runs only the removal and writes the result
 back beside the reconstruction, so the ordinary LCModel path fits cleaned spectra
 instead. The reconstruction stores FIDs and the removal takes spectra, so this
@@ -15,7 +15,7 @@ before this step and leaves its own record, so nothing is done about it here.
 Reads  <out_path>/CombinedCSI.mat   csi.Data, as run_julia_reco.jl writes it
        <tmp_dir>/mask_brain.raw     the same mask MRSI_Reconstruction uses
 Writes <out_path>/CombinedCSI.mat   csi.Data replaced by the cleaned FIDs
-       <out_path>/CombinedCSI_beforeWalinet.mat  the original, kept once
+       <out_path>/CombinedCSI_beforeWalrus.mat   the original, kept once
 """
 
 import os
@@ -32,37 +32,42 @@ def main(tmp_dir, model):
     combined = csi_io.combined_path(tmp_dir)
 
     csi = csi_io.load_csi(combined)
-    mask = csi_io.load_mask(tmp_dir, csi.shape[:3], "walinet_clean_csi")
-    print(f"walinet_clean_csi: csi {csi.shape}, {int(mask.sum())} voxels in the mask")
+    mask = csi_io.load_mask(tmp_dir, csi.shape[:3], "walrus_clean_csi")
+    print(f"walrus_clean_csi: csi {csi.shape}, {int(mask.sum())} voxels in the mask")
 
     was_corrected = bool(processing_record.read_record(combined).get("b0_corrected"))
-    print(f"walinet_clean_csi: field corrected before the removal: {was_corrected}")
+    print(f"walrus_clean_csi: field corrected before the removal: {was_corrected}")
 
-    clean = run_walinet(
+    clean = run_walrus(
         csi, mask, model, larmor_hz=csi_io.read_larmor_hz(combined, tmp_dir)
     )
 
-    backup = os.path.join(out_path, "CombinedCSI_beforeWalinet.mat")
+    backup = os.path.join(out_path, "CombinedCSI_beforeWalrus.mat")
     if not os.path.isfile(backup):
         shutil.copy2(combined, backup)
-        print(f"walinet_clean_csi: kept the original as {backup}")
+        print(f"walrus_clean_csi: kept the original as {backup}")
     csi_io.save_csi(combined, clean)
-    print(f"walinet_clean_csi: wrote the cleaned FIDs to {combined}")
+    print(f"walrus_clean_csi: wrote the cleaned FIDs to {combined}")
     # Rewriting the file invalidates the record, which names the size and time of
     # the file it describes, so it is restated for whatever reads the file next.
     processing_record.write_record(combined, b0_corrected=was_corrected)
 
 
-def run_walinet(csi, mask, model, larmor_hz=None):
-    import walinet.package_config as conf
-    import walinet.remove_water_and_lipids as rw
+def run_walrus(csi, mask, model, larmor_hz=None):
+    try:
+        import walrus.package_config as conf
+        import walrus.remove_water_and_lipids as rw
+    except ImportError:
+        # Images built before the package was renamed from walinet.
+        import walinet.package_config as conf
+        import walinet.remove_water_and_lipids as rw
 
     if model not in (None, "", "off"):
         conf.PACKAGE_CONFIG.model_relative_path = conf.resolve_model_relative_path(model)
-    print(f"walinet_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
+    print(f"walrus_clean_csi: model {conf.PACKAGE_CONFIG.model_relative_path}")
 
-    # Cropping and the field check live in walinet so both routes into it refuse
-    # the same things. "-L WALINET,3T" on a 7T scan is the case they exist for:
+    # Cropping and the field check live in walrus so both routes into it refuse
+    # the same things. "-L WALRUS,3T" on a 7T scan is the case they exist for:
     # the 3T model merely makes the acquisition look long, and without the check
     # it is cut from 840 points to 288 and processed anyway.
     csi = rw.crop_to_supported_length(csi, larmor_hz=larmor_hz)
@@ -77,11 +82,11 @@ def run_walinet(csi, mask, model, larmor_hz=None):
     ).astype(np.complex64)
 
     # isfinite on the complex array directly: .view(np.float32) needs a
-    # contiguous last axis and raises on anything WALINET returns as a view.
+    # contiguous last axis and raises on anything WALRUS returns as a view.
     if not np.all(np.isfinite(clean)):
-        sys.exit("ERROR: WALINET returned non-finite values.")
+        sys.exit("ERROR: WALRUS returned non-finite values.")
     if np.allclose(clean[mask], csi[mask], rtol=1e-4, atol=1e-4):
-        sys.exit("ERROR: WALINET left the masked voxels unchanged, inference did not run.")
+        sys.exit("ERROR: WALRUS left the masked voxels unchanged, inference did not run.")
     return clean
 
 
