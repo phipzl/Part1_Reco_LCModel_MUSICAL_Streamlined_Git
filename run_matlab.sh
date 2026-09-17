@@ -27,7 +27,6 @@ run_mrsi_reconstruction() {
         run_julia_reconstruction_or_stop "$1"
         return
     fi
-    refuse_julia_only_options
     if [[ $compiled_matlab_flag -eq 1 ]]; then
         # run the compiled matlab function
         echo -e "\nRun this command: $MatlabCompiledFunctions/MRSI_Reconstruction $abs_tmp_dir $1"

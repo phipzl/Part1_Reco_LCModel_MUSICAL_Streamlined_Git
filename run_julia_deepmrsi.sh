@@ -6,25 +6,40 @@
 # Stop the whole pipeline when a step fails, so the exit code reports it.
 # Argument $1: name of the step that failed.
 matlab_step_failed() {
-    echo -e "\n\n$1 failed, stopping.\n\n"
-    # run_matlab.sh is also sourced by scripts that have no TerminateProgram.
-    if declare -f TerminateProgram >/dev/null; then
-        TerminateProgram "$DebugFlag" 1
+    # run_matlab.sh is also sourced by create_mask.sh, a separate process that
+    # carries on after a failed step, so only the pipeline itself stops.
+    if ! declare -f TerminateProgram >/dev/null; then
+        echo -e "\n\n$1 failed.\n\n"
+        return 1
     fi
+    echo -e "\n\n$1 failed, stopping.\n\n"
+    TerminateProgram "$DebugFlag" 1
     exit 1
 }
 
-# Called once the options are parsed.
+# Called once the options are parsed, before anything is written.
 check_julia_deepmrsi_options() {
     # -l takes a method, so a bare -l takes the next option as its method.
     if [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]] && [[ $SpectralFitting_Method == -* ]]; then
         echo "-l needs a method (LCModel, DeepLearning or None), got '$SpectralFitting_Method'."
-        exit 1
+        matlab_step_failed "-l"
     fi
-    # Both choose the fitting, and together two fitters would run.
-    if [[ ${deep_learning_flag:-0} -eq 1 ]] && [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]]; then
-        echo "-Q and -l both choose the spectral fitting. Give one of them."
-        exit 1
+    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
+        case "$deep_learning_fitting" in
+            dlfit | gpufit | off) ;;
+            *)
+                echo "-Q needs a fitter (dlfit, gpufit or off), got '$deep_learning_fitting'."
+                matlab_step_failed "-Q"
+                ;;
+        esac
+        # Both choose the fitting, and together two fitters would run.
+        if [[ ${SpectralFittingDontUseLCM_flag:-0} -eq 1 ]]; then
+            echo "-Q and -l both choose the spectral fitting. Give one of them."
+            matlab_step_failed "-Q"
+        fi
+    fi
+    if [[ $julia_reconstruction -ne 1 ]]; then
+        refuse_julia_only_options
     fi
 }
 
@@ -206,6 +221,12 @@ refuse_julia_only_options() {
         echo -e "\n-A Patref is implemented for the Julia reconstruction (-S) only."
         matlab_step_failed "-A Patref"
     fi
+    # The MATLAB reconstruction does not keep the reference scan in CombinedCSI.mat,
+    # which deepmrsi needs.
+    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
+        echo -e "\n-Q is implemented for the Julia reconstruction (-S) only."
+        matlab_step_failed "-Q"
+    fi
 }
 
 # Argument $1: CurAv argument for run_julia_reco.jl
@@ -228,7 +249,8 @@ run_julia_reconstruction() {
         done
         return 1
     fi
-    if ! julia_lcm_writer_available; then
+    # -Q fits CombinedCSI.mat itself, so the LCModel files are written for LCModel only.
+    if [[ ${deep_learning_flag:-0} -ne 1 ]] && ! julia_lcm_writer_available; then
         echo -e "\nThe Julia output cannot be used, julia_write_lcm_files was not found."
         return 1
     fi
@@ -274,6 +296,14 @@ run_julia_reconstruction() {
         return 0
     fi
 
+    # A W1 water pass reconstructs no metabolites, so it has no CombinedCSI.mat for the
+    # steps below and no spectra to write. Same condition MRSI_Reconstruction.m applies
+    # before its LCM-file block.
+    if [[ $IsWaterPass -eq 1 ]]; then
+        echo -e "\nWater reference pass: coil weights stored, no LCModel files to write."
+        return 0
+    fi
+
     local Python
     Python=$(command -v python3 || command -v python)
     # -A Patref, on the finished reconstruction, before anything downstream reads it.
@@ -292,10 +322,7 @@ run_julia_reconstruction() {
         "$Python" "$ScriptDir/walrus_clean_csi.py" "$abs_tmp_dir" "$WalrusModel" || matlab_step_failed walrus_clean_csi.py
     fi
 
-    # A W1 water pass reconstructs no metabolites, so it has no spectra to write.
-    # Same condition MRSI_Reconstruction.m applies before its LCM-file block.
-    if [[ $IsWaterPass -eq 1 ]]; then
-        echo -e "\nWater reference pass: coil weights stored, no LCModel files to write."
+    if [[ ${deep_learning_flag:-0} -eq 1 ]]; then
         return 0
     fi
     if [[ $compiled_matlab_flag -eq 1 ]]; then
@@ -319,25 +346,11 @@ run_julia_reconstruction_or_stop() {
     matlab_step_failed "the Julia reconstruction"
 }
 
-# The MATLAB reconstruction aligns the frequency inside itself, so the deepmrsi
-# fit would correct the same data again. MATLAB saves AlignFreq_ShiftMap.mat in
-# every branch of the alignment, so that file is the evidence the record states.
-record_matlab_alignment() {
-    [[ ${AlignFreq_flag:-0} -eq 1 ]] || return 0
-    [[ -f "$out_path/AlignFreq/AlignFreq_ShiftMap.mat" ]] || return 0
-    local Python ScriptDir
-    Python=$(command -v python3 || command -v python)
-    [[ -n $Python ]] || return 0
-    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    "$Python" "$ScriptDir/processing_record.py" "$abs_tmp_dir" b0_corrected=true
-}
-
 # -Q: fit with deepmrsi instead of LCModel, maps as NIfTI in <out>/deepMRSI.
 run_deepmrsi_fit() {
     local OutDir="$out_path/deepMRSI" Options=() Python ScriptDir
     mkdir -p "$OutDir"
     write_initial_parameters_json
-    [[ $julia_reconstruction -eq 1 ]] || record_matlab_alignment
     [[ -n $deep_learning_fitting ]] && Options+=(--fitting "$deep_learning_fitting")
     # WALRUS is reached through -L, which runs it on the reconstruction before this
     # step, so deepmrsi's own removal stays off.
