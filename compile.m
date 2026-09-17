@@ -23,6 +23,7 @@ additionalFiles = [additionalFiles {'Create_MincTemplates.m'} {'create_mask_VOI.
 
 buildResults = compiler.build.standaloneApplication('GetPar_CreateTempl_MaskPart1.m', 'AdditionalFiles', additionalFiles, 'OutputDir', OutputDir)
 buildResults = compiler.build.standaloneApplication('MRSI_Reconstruction.m', 'AdditionalFiles', additionalFiles, 'OutputDir', OutputDir)
+buildResults = compiler.build.standaloneApplication('julia_write_lcm_files.m', 'AdditionalFiles', additionalFiles, 'OutputDir', OutputDir)
 
 %% Compile ExtractBrain_mask.m
 buildResults = compiler.build.standaloneApplication('ExtractBrain_mask.m', 'OutputDir', OutputDir)

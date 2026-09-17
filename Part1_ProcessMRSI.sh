@@ -69,7 +69,7 @@ TerminateProgram() {
     echo -e "\n\n\n\t\tE N D\n\n\n"
 
     if [[ "$Trapped" == "0" ]]; then
-        exit 0
+        exit "${2:-0}"
     fi
 }
 
@@ -102,7 +102,7 @@ if [ ! -d "$tmp_dir" ]; then
     exit 1
 fi
 chmod 775 "$tmp_dir"
-abs_tmp_dir=$(readlink -f "$tmp_dir")
+export abs_tmp_dir=$(readlink -f "$tmp_dir")
 
 # -1.4 Write the script output to a logfile
 logfile=${tmp_dir}/logfile.log
@@ -169,9 +169,10 @@ export control_echo_flag=0
 export basis_echo_flag=0
 export XPACE_motion_correction_flag=0
 export julia_reconstruction=0
+export deep_learning_flag=0
 export B1corr_flag=0
 export NonCartTraj_flag=0
-export compiled_matlab_flag=0
+export compiled_matlab_flag="${compiled_matlab_flag:-0}"
 #BOW
 export priors_flag=0
 export DebugAdditionalInput_flag=0
@@ -185,7 +186,7 @@ export julia_n_threads="auto"
 export julia_mmap="false"
 SpectralFitting_Method="LCModel"
 
-while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKl:u?' OPTION; do
+while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X:z:dFKl:Q:u?' OPTION; do
     case $OPTION in
 
     #mandatory
@@ -300,8 +301,10 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
         export julia_reconstruction=1
         export julia_n_threads="$OPTARG"
         julia_mmap=${!OPTIND}
-        if [[ -z $julia_mmap ]]; then
+        if [[ -z $julia_mmap || $julia_mmap == -* ]]; then
             julia_mmap="false"
+        else
+            ((OPTIND = OPTIND + 1))
         fi
         ;;
     t)
@@ -343,6 +346,13 @@ while getopts 'c:b:o:a:A:B:D:e:E:f:g:G:h:i:I:j:J:k:L:m:n:p:P:r:R:s:S:t:T:v:w:W:X
     l)	export SpectralFittingDontUseLCM_flag=1
         export SpectralFitting_Method="$OPTARG"	  
         ;;
+    Q)
+        export deep_learning_flag=1
+        export deep_learning_fitting="$OPTARG"
+        ;;
+    d)
+        DebugFlag=1
+        ;;
     u)
         export use_phantom_flag=1
         ;;
@@ -362,7 +372,7 @@ mandatory:
 optional:
 -b  [basis files]       Format: .BASIS. Used for LCM fitting (for FID)
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
--A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\".
+-A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\". \"Patref\" (with -S only) derives the field map from the reference scan, as the online FIRE route does.
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
 -D  [DebugAdditionalInput]  A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
 -e  [LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
@@ -375,7 +385,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data.
+-L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data. \"WALRUS,[7T|3T]\" (with -S only) removes water and lipids with WALRUS instead; WALINET is accepted as its old name.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -383,8 +393,8 @@ optional:
 -r  [InPlaneCaipPattern_And_VD_Radius]  The InPlaneCaipPattern and the VD_Radius as used in ParallelImagingSimReco.m. Example: \"InPlaneCaipPattern = [0 0 0; 0 0 0; 0 0 1]; VD_Radius = 2;\".
 -R  [SliceAliasingPattern]
 -s  [NonCartTrajFile_path]  Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
--S  [threads] [mmap]        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path.
--t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If minc file is given instead of folder, it is treated as the magnitude file.
+-S  [threads] [mmap]        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path. [threads] may be followed by \",matlab\" to reproduce MRSI_Reconstruction.m instead of the online ICE route.
+-t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If a minc or NIfTI file is given instead of folder, it is treated as the magnitude file.
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
 -w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
@@ -395,6 +405,8 @@ Flags:
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
 -l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed.
+-Q  [dlfit|gpufit]  Fit with the deepmrsi fitters instead of LCModel, maps as NIfTI in [output directory]/deepMRSI. gpufit is SpatialRegu. Not together with -l.
+-d  Debug: keep the temporary directory and the LCModel input files.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
 " $(basename $0) >&2
@@ -405,6 +417,7 @@ Flags:
 done
 
 shift $((OPTIND - 1))
+check_julia_deepmrsi_options
 
 ###0. GH: measure time elapsed:
 START=$(date +%s.%N)
@@ -443,9 +456,9 @@ fi
 run_matlab GetPar_CreateTempl_MaskPart1 0
 
 # Terminate if there was an error
-bash "$tmp_dir/ErrorFile.sh"
+source "$tmp_dir/ErrorFile.sh"
 if [[ $ErrorInGetPar_CreateTempl -eq 1 ]]; then
-    TerminateProgram $DebugFlag
+    TerminateProgram $DebugFlag 1
 fi
 
 # read -rp "stop before create minc template"
@@ -461,7 +474,7 @@ echo -e "\n\n4. CREATE MASK\n\n"
 # read -p "Stop before creating B0Map."
 ## 5.
 ############# CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA ############
-if [[ $AlignFreq_flag -eq 1 ]] && ! [[ $AlignFreq_MethodAndPath == "" ]]; then
+if [[ $AlignFreq_flag -eq 1 ]] && ! [[ $AlignFreq_MethodAndPath == "" ]] && ! patref_is_the_alignment; then
     echo -e "\n\n5. CREATE B0MAP FOR USAGE OF FREQUENCY ALIGNING CSI DATA\n\n"
     ./create_B0Map.sh
 fi
@@ -500,7 +513,9 @@ done
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 STARTLCM=$(date +%s.%N)
 echo -e "\n\n7. Start LCModel Processing\n\n"
-if [[ $SpectralFitting_Method == "LCModel" ]]; then
+if [[ $deep_learning_flag -eq 1 ]]; then
+    run_deepmrsi_fit
+elif [[ $SpectralFitting_Method == "LCModel" ]]; then
     curdir=$(pwd)
     CurrentComputer=$(hostname)
 

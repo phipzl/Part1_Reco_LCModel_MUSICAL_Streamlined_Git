@@ -923,7 +923,9 @@ function Info = ReadMeasurementInfoFromMRSI(Par)
             'Unknown'];    
     else
         mapVBVDHdr = read_twix_hdr_standalone(Par.Paths.csi_path{1});
-        mapVBVDHdr = mapVBVDHdr{end};
+        if(iscell(mapVBVDHdr))          % a single-measurement file gives a struct
+            mapVBVDHdr = mapVBVDHdr{end};
+        end
         Info=[mapVBVDHdr.Dicom.tPatientName, ' ', ...
             num2str(mapVBVDHdr.Config.PatientBirthDay), ' ', ...
             num2str(mapVBVDHdr.Dicom.flPatientAge), ' ', ...

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(dirname "${BASH_SOURCE[0]}")/run_julia_deepmrsi.sh"
+
 # Argument $1: name of matlab script
 run_matlab() {
     if [[ $compiled_matlab_flag -eq 1 ]]; then
@@ -8,7 +10,7 @@ run_matlab() {
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        "$MatlabCompiledFunctions/$1" "$abs_tmp_dir"
+        "$MatlabCompiledFunctions/$1" "$abs_tmp_dir" || matlab_step_failed "$1"
     else
         # run the matlab script $1
         echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); $1('$abs_tmp_dir')\""
@@ -21,13 +23,18 @@ run_matlab() {
 
 # Argument $1: CurAv argument for MRSI_Reconstruction.m
 run_mrsi_reconstruction() {
+    if [[ $julia_reconstruction -eq 1 ]]; then
+        run_julia_reconstruction_or_stop "$1"
+        return
+    fi
+    refuse_julia_only_options
     if [[ $compiled_matlab_flag -eq 1 ]]; then
         # run the compiled matlab function
         echo -e "\nRun this command: $MatlabCompiledFunctions/MRSI_Reconstruction $abs_tmp_dir $1"
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
-        "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1"
+        "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1" || matlab_step_failed MRSI_Reconstruction
     else
         # run the matlab script $1
         echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
