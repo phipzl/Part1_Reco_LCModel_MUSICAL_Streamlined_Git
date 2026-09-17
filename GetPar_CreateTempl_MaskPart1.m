@@ -901,11 +901,12 @@ function Info = ReadMeasurementInfoFromMRSI(Par)
         if(isempty(Test.PatientBirthDate))
             Test.PatientBirthDate = 'Unknown';
         end        
-        if(isempty(Test.PatientAge))
-            Test.PatientAge = 'Unknown';
-        end 
-        if(isempty(Test.PatientAge))
-            Test.PatientAge = 'Unknown';
+        if(~isfield(Test,'PatientAge') || isempty(Test.PatientAge))
+            if(isfield(Test,'PatientBirthDate') && ischar(Test.PatientBirthDate) && ~strcmpi(Test.PatientBirthDate,'Unknown') && isfield(Test,'AcquisitionDate'))
+                Test.PatientAge = calyears(between(datetime(Test.PatientBirthDate,'Format','yyyyMMdd'),datetime(Test.AcquisitionDate,'Format','yyyyMMdd')));
+            else
+                Test.PatientAge = 'Unknown';
+            end
         end 
         if(isempty(Test.PatientSex))
             Test.PatientSex = 'Unknown';
@@ -913,12 +914,7 @@ function Info = ReadMeasurementInfoFromMRSI(Par)
         if(isempty(Test.PatientWeight))
             Test.PatientWeight = 'Unknown';
         end         
-        if(isempty(Test.PatientSex))
-            Test.PatientSex = 'Unknown';
-        end 
-        if(isempty(Test.PatientSex))
-            Test.PatientSex = 'Unknown';
-        end 
+
 
         Info=[Par.CSI.PatName, ' ', ...
             num2str(Test.PatientBirthDate), ' ', ...

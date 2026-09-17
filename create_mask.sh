@@ -81,6 +81,7 @@ else                                                                            
     $rawtomincp -float -like ./${tmp_dir}/mag_template.mnc -input ./${tmp_dir}/magnitude.raw ./${tmp_dir}/magnitude.mnc # Done there: READ IN DAT OF ALL CHANNELS, SoS of CHANNELS, WRITE DAT AS .RAW
 fi
 cp ./${tmp_dir}/magnitude.mnc ${out_path}/maps/magnitude.mnc
+mnc2nii ${tmp_dir}/magnitude.mnc ${out_path}/maps/magnitude.nii; gzip -f ${out_path}/maps/magnitude.nii
 
 ##### Create FLAIR minc
 if [[ $FLAIR_flag -eq 1 ]]; then
@@ -89,6 +90,7 @@ if [[ $FLAIR_flag -eq 1 ]]; then
     dcm2mnc $FLAIR_path ./${tmp_dir}/flair.mnc
     echo "File flair.mnc was created in $tmp_dir."
     cp ./${tmp_dir}/flair.mnc ${out_path}/maps/flair.mnc
+    mnc2nii ${tmp_dir}/flair.mnc ${out_path}/maps/flair.nii; gzip -f ${out_path}/maps/flair.nii
 fi
 
 mkdir -p ${out_path}/maps/Extra/
@@ -308,24 +310,19 @@ if [[ $mask_flag -eq 1 ]]; then
 
     # Create .raw file and copy that to $out_path/maps
     minctoraw ./${tmp_dir}/mask_brain.mnc -nonormalize -float >./${tmp_dir}/mask_brain.raw
-    cp ./${tmp_dir}/mask_brain.raw "${out_path}/maps/mask.raw"
 
     if [[ -f ./${tmp_dir}/mask_brain_zf.mnc ]]; then
         minctoraw ./${tmp_dir}/mask_brain_zf.mnc -nonormalize -float >./${tmp_dir}/mask_brain_zf.raw
-        cp ./${tmp_dir}/mask_brain_zf.raw "${out_path}/maps/mask_zf.raw"
     fi
 
     if [[ -f ./${tmp_dir}/mask_lipid.mnc ]]; then
         minctoraw ./${tmp_dir}/mask_lipid.mnc -nonormalize -float >./${tmp_dir}/mask_lipid.raw
-        cp ./${tmp_dir}/mask_lipid.raw "${out_path}/maps/mask_lipid.raw"
     fi
 
     if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
         minctoraw ./${tmp_dir}/mask_brain_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_brain_BefInterpol.raw
-        cp ./${tmp_dir}/mask_brain_BefInterpol.raw "${out_path}/maps/mask_BefInterpol.raw"
         if [[ -f ./${tmp_dir}/mask_lipid_BefInterpol.mnc ]]; then
             minctoraw ./${tmp_dir}/mask_lipid_BefInterpol.mnc -nonormalize -float >./${tmp_dir}/mask_lipid_BefInterpol.raw
-            cp ./${tmp_dir}/mask_lipid_BefInterpol.raw "${out_path}/maps/mask_lipid_BefInterpol.raw"
         fi
     fi
 
@@ -343,12 +340,20 @@ else # If no mask-flag was used. There will be still a mask full of ones, create
 
     $rawtomincp -float -like ./${tmp_dir}/csi_template.mnc -input ./${tmp_dir}/mask_brain.raw ./${tmp_dir}/mask_brain.mnc
     $rawtomincp -float -like ./${tmp_dir}/csi_template_zf.mnc -input ./${tmp_dir}/mask_brain_zf.raw ./${tmp_dir}/mask_brain_zf.mnc
-    cp ./${tmp_dir}/mask_brain.raw ${out_path}/maps/mask.raw
-    cp ./${tmp_dir}/mask_brain_zf.raw ${out_path}/maps/mask_zf.raw
 
     if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
         $rawtomincp -float -like ./${tmp_dir}/csi_template_BefInterpol.mnc -input ./${tmp_dir}/mask_brain_BefInterpol.raw ./${tmp_dir}/mask_brain_BefInterpol.mnc
-        cp ./${tmp_dir}/mask_brain_BefInterpol.raw ${out_path}/maps/mask_BefInterpol.raw
     fi
 
 fi # if mask_flag = 1
+
+# Copy to Out-dir
+for Addon in _brain _brain_zf _lipid _brain_BefInterpol _lipid_BefInterpol; do
+	CurMask="mask${Addon}"
+	CurMaskOut=$(echo $CurMask | sed 's/_brain//g');
+	if [[ -f ${tmp_dir}/${CurMask}.mnc ]]; then
+		cp ${tmp_dir}/${CurMask}.mnc ${out_path}/maps/${CurMaskOut}.mnc
+		cp ${tmp_dir}/${CurMask}.raw ${out_path}/maps/${CurMaskOut}.taw
+		mnc2nii ${tmp_dir}/${CurMask}.mnc ${out_path}/maps/${CurMaskOut}.nii; gzip ${out_path}/maps/${CurMaskOut}.nii -f
+	fi
+done

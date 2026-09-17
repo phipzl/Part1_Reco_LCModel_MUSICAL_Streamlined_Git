@@ -30,7 +30,7 @@ echo "ZeroFillMetMaps_flag = ${ZeroFillMetMaps_flag};" >> $Par
 echo "InterpolateCSIResolution_flag = ${InterpolateCSIResolution_flag};" >> $Par
 echo "TimeInterpolation_flag = ${TimeInterpolation_flag};" >> $Par
 echo "AlignFreq_flag = ${AlignFreq_flag};" >> $Par
-echo "dont_compute_LCM_flag = ${dont_compute_LCM_flag};" >> $Par
+echo "SpectralFittingDontUseLCM_flag = ${SpectralFittingDontUseLCM_flag};" >> $Par
 echo "LCM_ControlPath_flag = ${LCM_ControlPath_flag};" >> $Par
 echo "LCM_ControlPath_Water_flag = ${LCM_ControlPath_Water_flag};" >> $Par
 echo "phase_encoding_direction_is_RL_flag = ${phase_encoding_direction_is_RL_flag};" >> $Par
@@ -141,7 +141,37 @@ if [[ $LipidDecon_flag -eq 1 ]]; then
 	echo "LipidDecon_MethodAndNoOfLoops = '${LipidDecon_MethodAndNoOfLoops}';" >> $Par
 fi
 if [[ $NuisRem_flag -eq 1 ]]; then
-	echo "NuisRem_ControlPath = '${NuisRem_ControlPath}';" >> $Par
+	CommaFound=$(echo ${NuisRem_MethodAndControlPath} | grep -ci  ",")
+	WalinetFound=$(echo ${NuisRem_MethodAndControlPath} | grep -ci  "Walinet")	
+	if [[ $WalinetFound -gt 0 ]]; then
+		echo "WalinetDependencies_Path = '${WalinetDependencies_Path}';" >> $Par
+	fi
+	if [[ $CommaFound -gt 0 ]]; then
+		export NuisRem_Method=$(echo ${NuisRem_MethodAndControlPath} | cut -d, -f1)
+		export NuisRem_Path=$(echo ${NuisRem_MethodAndControlPath} | cut -d, -f2)		# The second field is the path
+		if [[ $NuisRem_Path == $NuisRem_Method ]]; then									# If the user only inputs "Alignment" without comma, the cutting doesnt work
+			export NuisRem_Path=""
+		fi
+	else
+		if [[ $WalinetFound -eq 0 ]]; then
+			export NuisRem_Method="HSVD"
+			export NuisRem_Path=${NuisRem_MethodAndControlPath}
+		else
+			export NuisRem_Method="Walinet"
+			export NuisRem_Path=""		
+		fi
+	fi
+	echo "NuisRem_Method = '$NuisRem_Method';" >> $Par
+	if [[ ! "$NuisRem_Path" == "" ]]; then
+		echo "NuisRem_Path = '$NuisRem_Path';" >> $Par	
+	fi
+		
+#	if [[ "$NuisRem_MethodAndControlPath" == *"/"* ]]; then
+#		echo "NuisRem_Method = 'HSVD';" >> $Par	
+#		echo "NuisRem_MethodAndControlPath = '${NuisRem_MethodAndControlPath}';" >> $Par
+#	else
+#		echo "NuisRem_Method = '${NuisRem_MethodAndControlPath}';" >> $Par	
+#	fi	
 fi
 if [[ $mask_flag -eq 1 ]]; then
 	echo "mask_method = '${mask_method}';" >> $Par
@@ -171,6 +201,7 @@ if [[ $GradientDelay_flag -eq 1 ]]; then
 else
 	echo "GradientDelay = 0;" >> $Par
 fi
+echo "SpectralFitting_Method = '${SpectralFitting_Method}';" >> $Par
 
 if [[ $basis_echo_flag -eq 1 ]]; then
 	echo "basis_echo_path = '${basis_echo_path}';" >> $Par

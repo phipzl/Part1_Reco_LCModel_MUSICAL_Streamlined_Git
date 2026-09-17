@@ -24,7 +24,7 @@ run_matlab() {
         "$MatlabCompiledFunctions/$1" "$abs_tmp_dir" || matlab_step_failed "$1"
     else
         # run the matlab script $1
-        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); $1('$abs_tmp_dir')\""
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); $1('$abs_tmp_dir')\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
@@ -72,7 +72,8 @@ run_julia_reconstruction() {
     [[ $TimeInterpolation_flag -eq 1 ]] && OnlyInMatlab+=("-T (time interpolation)")
     [[ $FirstOrderPhaseCorr_flag -eq 1 ]] && OnlyInMatlab+=("-F (first order phase correction)")
     [[ $FirstOrderPhaseModulation_flag -eq 1 ]] && OnlyInMatlab+=("-k (first order phase modulation)")
-    [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal)")
+    [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal, including Walinet; use -L WALRUS)")
+    [[ $SpectralFitting_Method == *DeepLearning* ]] && OnlyInMatlab+=("-l DeepLearning (use -Q dlfit)")
 
     if [[ ${#OnlyInMatlab[@]} -gt 0 ]]; then
         echo -e "\nThe Julia reconstruction does not implement:"
@@ -217,7 +218,7 @@ run_mrsi_reconstruction() {
         "$MatlabCompiledFunctions/MRSI_Reconstruction" "$abs_tmp_dir" "$1" || matlab_step_failed MRSI_Reconstruction
     else
         # run the matlab script $1
-        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); cd $(pwd); MRSI_Reconstruction('$abs_tmp_dir', $1)\""
         if [[ $2 == "1" ]]; then
 	        read -p "stop before matlab call"
         fi
