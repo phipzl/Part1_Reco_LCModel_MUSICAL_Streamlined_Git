@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-run_deepmrsi.py: bridge between the MRSI pipeline and the deepmrsi quantification.
+run_deepmrsi.py: the deep fitters of the online FIRE route as one step of Part1.
 
 Called from step 7 of Part1_ProcessMRSI.sh for -l PHIVE, SpatialRegu or Both:
-    python run_deepmrsi.py <tmp_dir> <output_dir> [--fitting X] [--walrus_model Y]
+    python run_deepmrsi.py <tmp_dir> <out_path> [--fitting X] [--mask part1|deepmrsi]
 
-Takes its input from whichever the reconstruction left behind:
+Takes the spectra Part1's earlier steps left in CombinedCSI.mat (or a
+deepmrsi_inputs/ directory), fits them with deep_crt_mrsi's fitter and writes, in
+the layout of Part1's DeepLearning route:
 
-  <out_path>/deepmrsi_inputs/   NIfTI files, when a reconstruction writes them
-  <out_path>/CombinedCSI.mat    otherwise, read through deep_crt_mrsi.combined_csi
+  maps/Orig_<Fitter>/<met>_amp_map.nii        amplitude, as fitted
+  maps/Orig_<Fitter>/<met>_tCr_amp_map.nii    ratio to tCr
+  maps/Orig_<Fitter>/<met>_sd_map.nii         SpatialRegu posterior SD, percent
+  maps/Orig_<Fitter>/<met>_crlb_map.nii       PHIVE CRLB, percent
+  maps/SpecMap_<Fitter>{Input,Fit,Baseline}_{real,imag}.nii.gz
+  maps/SpecMap_{Raw,Processed}_{real,imag}.nii.gz   before and after Part1's steps
+  AlignFreq/B0map_Hz.nii                      the measured field map, with -A Patref
 
-then calls process_deep_mrsi_offline() and writes the metabolite maps as NIfTI to
-<output_dir>. Nothing in Part1 currently writes deepmrsi_inputs/, so in practice
-the second is the path taken; the first is kept because it is the richer input
-(it can carry a separate prescan) and costs nothing to keep.
+<Fitter> is SpatialRegu or PHIVE. Every map the fitter makes is written; the online
+route's removal of individual maps does not apply here. Geometry from
+maps/csi_template.nii(.gz); spectral axes as ppm = toffset + index * pixdim[4].
 """
 
 import argparse
@@ -26,29 +32,9 @@ import processing_record
 
 parser = argparse.ArgumentParser(description="Quantify the reconstructed MRSI data with deepmrsi.")
 parser.add_argument("tmp_dir", help="temporary directory of the current run")
-parser.add_argument("output_dir", help="directory the metabolic maps are written to")
+parser.add_argument("output_dir", help="Part1's output directory; the maps go to <output_dir>/maps")
 parser.add_argument("--fitting", choices=("dlfit", "gpufit", "both", "off"), default=None,
                     help="fitting backend, deepmrsi decides if it is not given")
-# The names come from walrus itself rather than a copy here, which is how this
-# list fell behind: it still offered legacy_7T/final_7T/final_3T after they were
-# renamed, so the 7T and 3T that Part1's own usage text documents were rejected.
-# Images built before the package was renamed from walinet take the old info keys.
-try:
-    from walrus.package_config import MODEL_CHOICES as WALRUS_MODEL_CHOICES
-    WALRUS_KEY = "walrus"
-except ImportError:
-    try:
-        from walinet.package_config import MODEL_CHOICES as WALRUS_MODEL_CHOICES
-    except ImportError:
-        WALRUS_MODEL_CHOICES = None
-    WALRUS_KEY = "walinet"
-
-parser.add_argument("--walrus_model", "--walinet_model", dest="walrus_model",
-                    choices=WALRUS_MODEL_CHOICES, default=None,
-                    help="WALRUS model for the water and lipid removal, deepmrsi decides if it is not given")
-parser.add_argument("--b0_correction", choices=("true", "false"), default=None,
-                    help="correct the field shift before fitting; Part1 passes -0 through here. "
-                         "Ignored when the reconstruction already carries the correction")
 parser.add_argument("--mask", choices=("part1", "deepmrsi"), default="part1",
                     help="which brain mask to fit: Part1's, cut to the excited volume "
                          "(default), or the one deepmrsi derives from the reference scan")
@@ -188,85 +174,178 @@ else:
 print(f"run_deepmrsi: fid shape = {fid.shape}")
 print(f"run_deepmrsi: patref shape = {patref.shape}")
 
-# Optional settings that deepmrsi understands, only passed on if they are there
-for key in ("bet_f", "bet_g", "fitting",
-            "lipidSuppression_beta", "use_prescan_for_masking",
-            "writeWithoutSuppression", "makehomogeneous_sigma", "b0_correction"):
+# Settings the fitters read, from the metadata when a reconstruction wrote one.
+for key in ("bet_f", "bet_g", "fitting", "makehomogeneous_sigma"):
     if key in meta:
         info[key] = meta[key]
-# Under whichever name the metadata uses, passed on under the one deepmrsi reads
-for new, old in (("walrus", "walinet"), ("walrus_model", "walinet_model")):
-    for key in (new, old):
-        if key in meta:
-            info[new.replace("walrus", WALRUS_KEY)] = meta[key]
-            break
-
-# The command line wins over the metadata. If neither sets them, deepmrsi keeps
-# its own defaults.
 if args.fitting is not None:
     info["fitting"] = args.fitting
-if args.walrus_model is not None:
-    info[WALRUS_KEY + "_model"] = args.walrus_model
-if args.b0_correction is not None:
-    info["b0_correction"] = args.b0_correction == "true"
 
-# A step between the reconstruction and here may already have corrected the
-# field: the WALRUS removal does, because its model is trained on corrected
-# data. deepmrsi is told so and skips its own correction rather than shifting
-# the FIDs a second time, and the fitter still learns the input is corrected.
-# Only for the file that was actually read: the record describes CombinedCSI.mat
-# and says nothing about a deepmrsi_inputs directory written separately.
+# Part1's own steps (-A for the field, -L for water and lipids) ran on this data
+# before. The fitter only needs to know whether the field is corrected, since that
+# decides its landmark search. The record describes CombinedCSI.mat, not a
+# deepmrsi_inputs directory written separately.
 if combined_read_from is not None and processing_record.read_record(
     combined_read_from
 ).get("b0_corrected"):
-    print("run_deepmrsi: the reconstruction is already B0 corrected, not correcting again")
+    print("run_deepmrsi: the reconstruction is B0 corrected")
     info["b0_corrected"] = True
 
-# Part1 masked the brain on the anatomical and cut the mask to the excited volume.
-# Fitting those voxels keeps the deep fitting on the same set as LCModel, instead
-# of deepmrsi's own reference-scan mask, which reaches into the periphery where
-# neither fitter is reliable.
-def find_part1_mask(tmp_dir, combined):
-    candidates = [os.path.join(tmp_dir, "mask_brain.raw")]
-    if combined is not None:
-        candidates.insert(0, os.path.join(os.path.dirname(combined), "maps", "mask.raw"))
-    for candidate in candidates:
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
-if args.mask == "part1":
-    mask_raw = find_part1_mask(tmp_dir, combined_read_from)
-    grid = tuple(int(n) for n in fid.shape[:3])
-    values = np.fromfile(mask_raw, dtype="<f4") if mask_raw else np.empty(0)
-    if values.size == int(np.prod(grid)):
-        # Part1 writes the mask with z slowest; the arrays here are x, y, z.
-        mask = values.reshape(grid[2], grid[1], grid[0]).transpose(2, 1, 0) > 0.5
-        os.makedirs(output_dir, exist_ok=True)
-        info["mask_fn"] = os.path.join(output_dir, "part1_mask.nii.gz")
-        nib.save(nib.Nifti1Image(mask.astype(np.uint8), np.eye(4)), info["mask_fn"])
-        print(f"run_deepmrsi: fitting the {int(mask.sum())} voxels of Part1's mask, {mask_raw}")
-    else:
-        print("run_deepmrsi: no Part1 mask for this grid, deepmrsi masks on the reference scan")
-
-os.makedirs(output_dir, exist_ok=True)
-
 try:
-    from deep_crt_mrsi.deepmrsi import process_deep_mrsi_offline
+    import deep_crt_mrsi.deepmrsi as fire
+    import deep_crt_mrsi.package_config as fire_conf
 except ImportError as e:
     print(f"ERROR: could not import deep_crt_mrsi: {e}", file=sys.stderr)
-    print("Install it first: pip install -e [path to deep_crt_mrsi]", file=sys.stderr)
     sys.exit(1)
 
-print(f"run_deepmrsi: calling process_deep_mrsi_offline, output to {output_dir}")
-print(f"  dwelltime={info['dwelltime']} ms, larmor_frequency={info['larmor_frequency']} Hz")
-print(f"  inplane_res={info['inplane_res']} mm, fov_slice={info['fov_slice']} mm")
-print(f"  fitting={info.get('fitting', 'deepmrsi default')}, "
-      f"walrus_model={info.get(WALRUS_KEY + '_model', 'deepmrsi default')}")
-print(f"  b0_correction={info.get('b0_correction', 'deepmrsi default')}, "
-      f"input already corrected={info.get('b0_corrected', False)}")
+info["online"] = False
+for key, default in (("bet_f", fire_conf.PACKAGE_CONFIG.bet_f),
+                     ("bet_g", fire_conf.PACKAGE_CONFIG.bet_g),
+                     ("makehomogeneous_sigma", fire_conf.PACKAGE_CONFIG.makehomogeneous_sigma),
+                     ("fitting", fire_conf.PACKAGE_CONFIG.fitting)):
+    info.setdefault(key, default)
 
-process_deep_mrsi_offline(fid, patref, info, output_dir, uncomb_prescan=prescan)
+out_path = os.path.abspath(output_dir)
+maps_dir = os.path.join(out_path, "maps")
+template_path = next((p for p in (os.path.join(maps_dir, "csi_template.nii.gz"),
+                                  os.path.join(maps_dir, "csi_template.nii"))
+                      if os.path.isfile(p)), None)
+if template_path is None:
+    print(f"ERROR: no csi_template.nii(.gz) in {maps_dir}; the maps take their geometry from it",
+          file=sys.stderr)
+    sys.exit(1)
+template = nib.load(template_path)
+grid = tuple(int(n) for n in fid.shape[:3])
+if tuple(template.shape[:3]) != grid:
+    print(f"ERROR: csi_template is {template.shape[:3]}, the data {grid}", file=sys.stderr)
+    sys.exit(1)
 
-print(f"run_deepmrsi: done, the metabolite maps are in {output_dir}")
+
+def read_part1_raw(path):
+    """A Part1 .raw volume on the spectroscopy grid, x fastest, as (x, y, z)."""
+    values = np.fromfile(path, dtype="<f4")
+    if values.size != int(np.prod(grid)):
+        return None
+    return values.reshape(grid, order="F")
+
+
+# Part1 masked the brain on the anatomical and cut the mask to the excited volume,
+# so the deep fitters fit the voxels LCModel fits. Without one, the reference scan
+# is masked the way the online route does it.
+mask = None
+if args.mask == "part1":
+    for candidate in (os.path.join(maps_dir, "mask.raw"), os.path.join(tmp_dir, "mask_brain.raw")):
+        if os.path.isfile(candidate):
+            values = read_part1_raw(candidate)
+            if values is not None:
+                mask = values > 0.5
+                print(f"run_deepmrsi: fitting the {int(mask.sum())} voxels of Part1's mask, {candidate}")
+                break
+if mask is None:
+    print("run_deepmrsi: no Part1 mask for this grid, masking the reference scan with BET")
+    mask, _, _ = fire.bet_mask(patref, info)
+if not mask.any():
+    print("run_deepmrsi: the mask is empty, fitting every voxel")
+    mask[:] = True
+
+fid4 = fire.ensure_4d(fid) if fire.is_already_combined(fid) else fire.coil_combine(fid, patref)
+
+
+def write_map(folder, name, volume):
+    os.makedirs(folder, exist_ok=True)
+    image = nib.Nifti1Image(np.asarray(volume, dtype=np.float32).reshape(grid),
+                            template.affine, template.header)
+    image.set_data_dtype(np.float32)
+    nib.save(image, os.path.join(folder, name + ".nii"))
+
+
+def ppm_axis(model_grid, n):
+    """ppm of each sample: the parent grid's centre sample at 4.7 ppm, rising with
+    the index, which is how the viewer places the online route's spectra."""
+    parent = int(model_grid["signal_length"])
+    first = int(model_grid["interval_bounds"][0])
+    step = 1.0 / (model_grid["dwelltime_s"] * parent * model_grid["reference_frequency_mhz"])
+    return 4.7 + (first + np.arange(n) - (parent >> 1)) * step, step
+
+
+def write_spectral_map(name, spectra, model_grid):
+    """Real and imaginary part as two 4D files, the ppm axis in the header
+    (toffset + index * pixdim[4]), as Part1's DeepLearning route writes them."""
+    spectra = np.asarray(spectra)
+    ppm, step = ppm_axis(model_grid, spectra.shape[3])
+    for part, values in (("real", spectra.real), ("imag", spectra.imag)):
+        header = template.header.copy()
+        header.set_data_dtype(np.float32)
+        image = nib.Nifti1Image(values.astype(np.float32), template.affine, header)
+        image.header["pixdim"][4] = step
+        image.header["toffset"] = float(ppm[0])
+        image.header["descrip"] = b"ppm = toffset + index * pixdim[4]"
+        nib.save(image, os.path.join(maps_dir, f"SpecMap_{name}_{part}.nii.gz"))
+
+
+def full_band(fid_array):
+    """A FID cube as spectra on its own full grid, in the online route's convention."""
+    n = int(fid_array.shape[3])
+    model_grid = {"signal_length": n, "interval_bounds": [0, n],
+                  "dwelltime_s": float(info["dwelltime"]) * 1e-9,
+                  "reference_frequency_mhz": float(info["larmor_frequency"]) * 1e-6}
+    return fire._fid_to_spec(np.conj(fid_array)), model_grid
+
+
+def map_file_name(fire_name):
+    """The fitter's map name, after adjust_naming, in Part1's scheme."""
+    if fire_name.endswith("_Hz"):
+        return fire_name
+    if fire_name.endswith("/tCr"):
+        return fire_name[: -len("/tCr")] + "_tCr_amp_map"
+    if fire_name.endswith(("_sd", "_crlb")):
+        return fire_name + "_map"
+    return fire_name + "_amp_map"
+
+
+def map_values(fire_name, volume):
+    """Amplitudes and ratios as fitted; uncertainties, a fraction from the fitter,
+    in percent like LCModel's %SD; field maps in Hz."""
+    if fire_name.endswith(("_sd", "_crlb")):
+        return np.asarray(volume) * 100.0
+    return volume
+
+
+# The spectra before and after Part1's own steps: the reconstruction as it came out,
+# when the Julia route left it behind, and what the fitter fits.
+spectra, model_grid = full_band(fid4)
+write_spectral_map("Processed", spectra, model_grid)
+raw_path = os.path.join(out_path, "julia_csi.raw")
+if os.path.isfile(raw_path):
+    raw = np.fromfile(raw_path, dtype=np.complex64)
+    n_raw = raw.size // int(np.prod(grid))
+    if n_raw * int(np.prod(grid)) == raw.size:
+        spectra, model_grid = full_band(raw.reshape(grid + (n_raw,), order="F"))
+        write_spectral_map("Raw", spectra, model_grid)
+
+b0_raw = os.path.join(out_path, "AlignFreq", "B0map_Hz.raw")
+if os.path.isfile(b0_raw):
+    b0 = read_part1_raw(b0_raw)
+    if b0 is not None:
+        write_map(os.path.join(out_path, "AlignFreq"), "B0map_Hz", b0)
+
+resolved = fire._resolve_fitting(info)
+fitter_names = {"dlfit": ["dlfit"], "gpufit": ["gpufit"], "both": ["dlfit", "gpufit"]}.get(resolved, [])
+if not fitter_names:
+    print(f"run_deepmrsi: fitting resolved to {resolved!r}, no maps written")
+for fitter in fitter_names:
+    make = fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter
+    label = fire.OUTWARD_NAMES[fitter]
+    print(f"run_deepmrsi: fitting with {label}")
+    images, names, fits, baselines, windowed, fit_grid = make(info, False)(fid4, mask)
+    images, names = fire._drop_empty_landmark_map(images, names)
+    names = list(names)
+    fire.adjust_naming(names)
+    folder = os.path.join(maps_dir, f"Orig_{label}")
+    for volume, name in zip(images, names):
+        write_map(folder, map_file_name(name), map_values(name, volume))
+    for data, kind in ((windowed, "Input"), (fits, "Fit"), (baselines, "Baseline")):
+        write_spectral_map(f"{label}{kind}", data, fit_grid)
+    print(f"run_deepmrsi: {len(names)} maps in {folder}")
+
+print(f"run_deepmrsi: done, maps in {maps_dir}")

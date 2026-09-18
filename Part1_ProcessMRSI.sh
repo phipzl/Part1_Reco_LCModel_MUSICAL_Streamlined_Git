@@ -399,7 +399,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed. With -S also \"PHIVE\", \"SpatialRegu\" or \"Both\", the fitters of the online FIRE route, maps as NIfTI in [output directory]/deepMRSI.
+-l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed. With -S also \"PHIVE\", \"SpatialRegu\" or \"Both\", the fitters of the online FIRE route, maps as NIfTI in [output directory]/maps/Orig_[fitter].
 -d  Debug: keep the temporary directory and the LCModel input files.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 

@@ -355,16 +355,10 @@ run_julia_reconstruction_or_stop() {
 # -l PHIVE, SpatialRegu or Both: fit with deepmrsi instead of LCModel, maps as NIfTI
 # in <out>/deepMRSI.
 run_deepmrsi_fit() {
-    local OutDir="$out_path/deepMRSI" Options=() Python ScriptDir
-    mkdir -p "$OutDir"
+    local OutDir="$out_path" Options=() Python ScriptDir
     write_initial_parameters_json
+    # Only the fit: -A and -L ran as Part1's own steps before this one.
     Options+=(--fitting "$(deepmrsi_fitting)")
-    # WALRUS is reached through -L, which runs it on the reconstruction before this
-    # step, so deepmrsi's own removal stays off.
-    Options+=(--walrus_model off)
-    # With -A Patref the reconstruction is corrected already, and run_deepmrsi.py
-    # reads that from the record beside it rather than correcting a second time.
-    patref_is_the_alignment && Options+=(--b0_correction true)
     Python=$(command -v python3 || command -v python)
     [[ -n $Python ]] || matlab_step_failed "the deepmrsi fit (no python3 or python found)"
     ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
