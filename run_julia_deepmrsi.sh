@@ -34,6 +34,11 @@ check_julia_deepmrsi_options() {
                 ;;
         esac
     fi
+    # The deep fitters write their maps on csi_template's grid, which -z changes.
+    if [[ -n $(deepmrsi_fitting) ]] && [[ ${ZeroFillMetMaps_flag:-0} -eq 1 ]]; then
+        echo "-z is not supported with -l $SpectralFitting_Method: the maps are written on the unfilled grid."
+        matlab_step_failed "-z"
+    fi
     if [[ $julia_reconstruction -ne 1 ]]; then
         refuse_julia_only_options
     fi
@@ -353,7 +358,7 @@ run_julia_reconstruction_or_stop() {
 }
 
 # -l PHIVE, SpatialRegu or Both: fit with deepmrsi instead of LCModel, maps as NIfTI
-# in <out>/deepMRSI.
+# in <out>/maps/Orig_<Fitter>.
 run_deepmrsi_fit() {
     local OutDir="$out_path" Options=() Python ScriptDir
     write_initial_parameters_json

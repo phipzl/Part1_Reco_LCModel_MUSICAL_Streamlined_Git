@@ -9,17 +9,18 @@ Takes the spectra Part1's earlier steps left in CombinedCSI.mat (or a
 deepmrsi_inputs/ directory), fits them with deep_crt_mrsi's fitter and writes, in
 the layout of Part1's DeepLearning route:
 
-  maps/Orig_<Fitter>/<met>_amp_map.nii        amplitude, as fitted
-  maps/Orig_<Fitter>/<met>_tCr_amp_map.nii    ratio to tCr
-  maps/Orig_<Fitter>/<met>_sd_map.nii         SpatialRegu posterior SD, percent
-  maps/Orig_<Fitter>/<met>_crlb_map.nii       PHIVE CRLB, percent
+  maps/Orig_<Fitter>/<met>_amp_map.nii.gz     amplitude, as fitted
+  maps/Orig_<Fitter>/<met>_tCr_amp_map.nii.gz ratio to tCr
+  maps/Orig_<Fitter>/<met>_sd_map.nii.gz      SpatialRegu posterior SD, percent
+  maps/Orig_<Fitter>/<met>_crlb_map.nii.gz    PHIVE CRLB, percent
   maps/SpecMap_<Fitter>{Input,Fit,Baseline}_{real,imag}.nii.gz
   maps/SpecMap_{Raw,Processed}_{real,imag}.nii.gz   before and after Part1's steps
-  AlignFreq/B0map_Hz.nii                      the measured field map, with -A Patref
+  AlignFreq/B0map_Hz.nii.gz                   the measured field map, with -A Patref
 
 <Fitter> is SpatialRegu or PHIVE. Every map the fitter makes is written; the online
 route's removal of individual maps does not apply here. Geometry from
-maps/csi_template.nii(.gz); spectral axes as ppm = toffset + index * pixdim[4].
+maps/csi_template.nii(.gz); spectral axes highest ppm first, as
+ppm = toffset + index * pixdim[4].
 """
 
 import argparse
@@ -256,12 +257,13 @@ def write_map(folder, name, volume):
     image = nib.Nifti1Image(np.asarray(volume, dtype=np.float32).reshape(grid),
                             template.affine, template.header)
     image.set_data_dtype(np.float32)
-    nib.save(image, os.path.join(folder, name + ".nii"))
+    nib.save(image, os.path.join(folder, name + ".nii.gz"))
 
 
 def ppm_axis(model_grid, n):
     """ppm of each sample: the parent grid's centre sample at 4.7 ppm, rising with
-    the index, which is how the viewer places the online route's spectra."""
+    the index, which is how the viewer places the online route's spectra. The
+    fitter's spectra and full_band's share this convention."""
     parent = int(model_grid["signal_length"])
     first = int(model_grid["interval_bounds"][0])
     step = 1.0 / (model_grid["dwelltime_s"] * parent * model_grid["reference_frequency_mhz"])
@@ -269,16 +271,17 @@ def ppm_axis(model_grid, n):
 
 
 def write_spectral_map(name, spectra, model_grid):
-    """Real and imaginary part as two 4D files, the ppm axis in the header
-    (toffset + index * pixdim[4]), as Part1's DeepLearning route writes them."""
-    spectra = np.asarray(spectra)
+    """Real and imaginary part as two 4D files, highest ppm first, the axis in the
+    header as ppm = toffset + index * pixdim[4] with a negative pixdim[4], as Part1's
+    DeepLearning route writes them."""
+    spectra = np.asarray(spectra)[..., ::-1]
     ppm, step = ppm_axis(model_grid, spectra.shape[3])
     for part, values in (("real", spectra.real), ("imag", spectra.imag)):
         header = template.header.copy()
         header.set_data_dtype(np.float32)
-        image = nib.Nifti1Image(values.astype(np.float32), template.affine, header)
-        image.header["pixdim"][4] = step
-        image.header["toffset"] = float(ppm[0])
+        image = nib.Nifti1Image(np.ascontiguousarray(values, dtype=np.float32), template.affine, header)
+        image.header["pixdim"][4] = -step
+        image.header["toffset"] = float(ppm[-1])
         image.header["descrip"] = b"ppm = toffset + index * pixdim[4]"
         nib.save(image, os.path.join(maps_dir, f"SpecMap_{name}_{part}.nii.gz"))
 
@@ -315,13 +318,16 @@ def map_values(fire_name, volume):
 # when the Julia route left it behind, and what the fitter fits.
 spectra, model_grid = full_band(fid4)
 write_spectral_map("Processed", spectra, model_grid)
+del spectra
 raw_path = os.path.join(out_path, "julia_csi.raw")
 if os.path.isfile(raw_path):
     raw = np.fromfile(raw_path, dtype=np.complex64)
     n_raw = raw.size // int(np.prod(grid))
-    if n_raw * int(np.prod(grid)) == raw.size:
+    if n_raw >= 1 and n_raw * int(np.prod(grid)) == raw.size:
         spectra, model_grid = full_band(raw.reshape(grid + (n_raw,), order="F"))
+        del raw
         write_spectral_map("Raw", spectra, model_grid)
+        del spectra
 
 b0_raw = os.path.join(out_path, "AlignFreq", "B0map_Hz.raw")
 if os.path.isfile(b0_raw):
@@ -332,7 +338,8 @@ if os.path.isfile(b0_raw):
 resolved = fire._resolve_fitting(info)
 fitter_names = {"dlfit": ["dlfit"], "gpufit": ["gpufit"], "both": ["dlfit", "gpufit"]}.get(resolved, [])
 if not fitter_names:
-    print(f"run_deepmrsi: fitting resolved to {resolved!r}, no maps written")
+    print(f"ERROR: no fitter to run, the fitting resolved to {resolved!r}", file=sys.stderr)
+    sys.exit(1)
 for fitter in fitter_names:
     make = fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter
     label = fire.OUTWARD_NAMES[fitter]
