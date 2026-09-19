@@ -152,16 +152,15 @@ if [[ $mask_flag -eq 1 ]]; then
 		if [[ -f ./${tmp_dir}/mask_user.nii ]]; then
 			nii2mnc -quiet -clobber ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc
 		fi
-		minccalc -quiet -clobber -float -expression 'A[0] > 0.5 ? 1 : 0' ./${tmp_dir}/mask_user.mnc ./${tmp_dir}/mask_brain_unres.mnc
-		mincresample -clobber -nearest_neighbour -float -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc
-		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc
+		# Not named mask_brain_unres: that one is kept as the hires mask for B0 unwrapping.
+		minccalc -quiet -clobber -float -expression 'A[0] > 0.5 ? 1 : 0' ./${tmp_dir}/mask_user.mnc ./${tmp_dir}/mask_user_bin.mnc
+		mincresample -clobber -nearest_neighbour -float -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_user_bin.mnc ./${tmp_dir}/mask_brain.mnc
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_user_bin.mnc ./${tmp_dir}/mask_brain_zf.mnc
 		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
-			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
-			cp ./${tmp_dir}/mask_brain_BefInterpol.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc
+			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_user_bin.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
 		fi
-		# No lipid mask comes with it: as for the threshold mask, the brain mask stands in.
-		cp ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_lipid.mnc
-		rm -f ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc
+		# No lipid mask comes with it; the reconstruction then takes the whole grid for the lipid basis.
+		rm -f ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc ./${tmp_dir}/mask_user_bin.mnc
 
 	#############################
 	########   B  E  T   ########
@@ -301,13 +300,15 @@ if [[ $mask_flag -eq 1 ]]; then
         if [[ -f "./${tmp_dir}/mask_brain.mnc" ]]; then
             mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_brain2.mnc
             mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI_zf.mnc ./${tmp_dir}/mask_brain_zf.mnc ./${tmp_dir}/mask_brain2_zf.mnc
-            mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_lipid.mnc ./${tmp_dir}/mask_lipid2.mnc
             rm ./${tmp_dir}/mask_brain.mnc
             rm ./${tmp_dir}/mask_brain_zf.mnc
-            rm ./${tmp_dir}/mask_lipid.mnc
             mv ./${tmp_dir}/mask_brain2.mnc ./${tmp_dir}/mask_brain.mnc
             mv ./${tmp_dir}/mask_brain2_zf.mnc ./${tmp_dir}/mask_brain_zf.mnc
-            mv ./${tmp_dir}/mask_lipid2.mnc ./${tmp_dir}/mask_lipid.mnc
+            if [[ -f ./${tmp_dir}/mask_lipid.mnc ]]; then
+                mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_lipid.mnc ./${tmp_dir}/mask_lipid2.mnc
+                rm ./${tmp_dir}/mask_lipid.mnc
+                mv ./${tmp_dir}/mask_lipid2.mnc ./${tmp_dir}/mask_lipid.mnc
+            fi
         else
             mv ./${tmp_dir}/mask_brain_VOI.mnc ./${tmp_dir}/mask_brain.mnc
             mv ./${tmp_dir}/mask_brain_VOI_zf.mnc ./${tmp_dir}/mask_brain_zf.mnc
@@ -320,11 +321,13 @@ if [[ $mask_flag -eq 1 ]]; then
     if [[ -f "./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc" ]]; then
         if [[ -f "./${tmp_dir}/mask_brain_BefInterpol.mnc" ]]; then
             mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc ./${tmp_dir}/mask_brain2.mnc
-            mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc ./${tmp_dir}/mask_lipid2.mnc
             rm ./${tmp_dir}/mask_brain_BefInterpol.mnc
-            rm ./${tmp_dir}/mask_lipid_BefInterpol.mnc
             mv ./${tmp_dir}/mask_brain2.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
-            mv ./${tmp_dir}/mask_lipid2.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc
+            if [[ -f ./${tmp_dir}/mask_lipid_BefInterpol.mnc ]]; then
+                mincmath -nocheck_dimensions -mult ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc ./${tmp_dir}/mask_lipid2.mnc
+                rm ./${tmp_dir}/mask_lipid_BefInterpol.mnc
+                mv ./${tmp_dir}/mask_lipid2.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc
+            fi
         else
             mv ./${tmp_dir}/mask_brain_BefInterpol_VOI.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
         fi

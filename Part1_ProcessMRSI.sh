@@ -413,6 +413,17 @@ done
 shift $((OPTIND - 1))
 check_julia_deepmrsi_options
 
+# A mask file given with -m has to exist: create_mask.sh would otherwise make
+# another mask without a word. It runs in the temp folder, so the path is made absolute.
+case "$mask_method" in
+    */*|*.nii|*.nii.gz|*.mnc)
+        if [[ $mask_flag -eq 1 ]]; then
+            [[ -f "$mask_method" ]] || { echo -e "\nThe mask file given with -m does not exist: $mask_method"; exit 1; }
+            export mask_method=$(readlink -f "$mask_method")
+        fi
+        ;;
+esac
+
 ###0. GH: measure time elapsed:
 START=$(date +%s.%N)
 
@@ -464,6 +475,10 @@ mnc2nii ${tmp_dir}/csi_template.mnc ${out_path}/maps/csi_template.nii; gzip --fo
 ############# USE MASK OR CREATE MASK OUT OF (IN PRIORITY ORDER): MASK, T1_MAP, IMAGING AC, IMAGING VC, CSI ############
 echo -e "\n\n4. CREATE MASK\n\n"
 ./create_mask.sh
+if [[ $mask_flag -eq 1 && -f "$mask_method" && ! -s "$abs_tmp_dir/mask_brain.raw" ]]; then
+    echo -e "\nThe mask file given with -m could not be read: $mask_method"
+    exit 1
+fi
 
 # read -p "Stop before creating B0Map."
 ## 5.
