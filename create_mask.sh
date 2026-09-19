@@ -109,9 +109,9 @@ if [[ $mask_flag -eq 1 ]]; then
     bet_found=$(echo $mask_method | grep -c -i "bet")
     thresh_found=$(echo $mask_method | grep -c -i "thresh")
     ThreeD_found=$(echo $mask_method | grep -c -i "dreid")
-    # A mask file wins over the method names, which a file name may contain (brain_bet_mask.nii.gz).
+    # A mask file (mask_file, set by Part1_ProcessMRSI.sh) wins over the method names.
     ext_mask=0
-    if [[ -f "$mask_method" ]]; then
+    if [[ -n ${mask_file:-} && -f "$mask_file" ]]; then
         ext_mask=1; voi_found=0; bet_found=0; thresh_found=0; ThreeD_found=0
     fi
 	if [[ $ThreeD_found > 0 ]]; then
@@ -144,10 +144,10 @@ if [[ $mask_flag -eq 1 ]]; then
 	# A mask file on any grid, for example one made on the anatomical: MINC or NIfTI,
 	# binarised at 0.5 and resampled onto the CSI grids like the BET mask.
 	if [[ $ext_mask -eq 1 ]]; then
-		case "$mask_method" in
-			*.nii.gz) gunzip -c "$mask_method" > ./${tmp_dir}/mask_user.nii ;;
-			*.nii) cp "$mask_method" ./${tmp_dir}/mask_user.nii ;;
-			*) cp "$mask_method" ./${tmp_dir}/mask_user.mnc ;;
+		case "$mask_file" in
+			*.nii.gz) gunzip -c "$mask_file" > ./${tmp_dir}/mask_user.nii ;;
+			*.nii) cp "$mask_file" ./${tmp_dir}/mask_user.nii ;;
+			*) cp "$mask_file" ./${tmp_dir}/mask_user.mnc ;;
 		esac
 		if [[ -f ./${tmp_dir}/mask_user.nii ]]; then
 			nii2mnc -quiet -clobber ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc
@@ -158,6 +158,10 @@ if [[ $mask_flag -eq 1 ]]; then
 		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_user_bin.mnc ./${tmp_dir}/mask_brain_zf.mnc
 		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
 			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_user_bin.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
+		fi
+		# Part1_ProcessMRSI.sh stops the run when the file could not be read or holds no brain here.
+		if [[ ! -f ./${tmp_dir}/mask_brain.mnc ]] || [[ $(mincstats -quiet -sum ./${tmp_dir}/mask_brain.mnc 2>/dev/null | cut -d. -f1) -le 0 ]]; then
+			touch ./${tmp_dir}/mask_user_failed
 		fi
 		# No lipid mask comes with it; the reconstruction then takes the whole grid for the lipid basis.
 		rm -f ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc ./${tmp_dir}/mask_user_bin.mnc

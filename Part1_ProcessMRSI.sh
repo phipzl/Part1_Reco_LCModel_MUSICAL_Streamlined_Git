@@ -413,16 +413,23 @@ done
 shift $((OPTIND - 1))
 check_julia_deepmrsi_options
 
-# A mask file given with -m has to exist: create_mask.sh would otherwise make
-# another mask without a word. It runs in the temp folder, so the path is made absolute.
-case "$mask_method" in
-    */*|*.nii|*.nii.gz|*.mnc)
-        if [[ $mask_flag -eq 1 ]]; then
+# A mask file given with -m: anything that is not a method name. It has to exist
+# (relative paths are taken from the caller's directory), and create_mask.sh reads it
+# as mask_file. The MATLAB steps match -m by keyword; they read usermask_bet, so the
+# file is cut to the excited slab exactly as a BET mask is, whatever its name.
+export mask_file=""
+if [[ $mask_flag -eq 1 ]]; then
+    case "${mask_method,,}" in
+        bet|bet,*|thresh|thresh,*|voi|dreid*) ;;
+        *)
+            [[ -f "$mask_method" || ! -f "$calldir/$mask_method" ]] || mask_method="$calldir/$mask_method"
             [[ -f "$mask_method" ]] || { echo -e "\nThe mask file given with -m does not exist: $mask_method"; exit 1; }
-            export mask_method=$(readlink -f "$mask_method")
-        fi
-        ;;
-esac
+            export mask_file=$(readlink -f "$mask_method")
+            export mask_method="usermask_bet"
+            echo "Mask file: $mask_file"
+            ;;
+    esac
+fi
 
 ###0. GH: measure time elapsed:
 START=$(date +%s.%N)
@@ -475,9 +482,9 @@ mnc2nii ${tmp_dir}/csi_template.mnc ${out_path}/maps/csi_template.nii; gzip --fo
 ############# USE MASK OR CREATE MASK OUT OF (IN PRIORITY ORDER): MASK, T1_MAP, IMAGING AC, IMAGING VC, CSI ############
 echo -e "\n\n4. CREATE MASK\n\n"
 ./create_mask.sh
-if [[ $mask_flag -eq 1 && -f "$mask_method" && ! -s "$abs_tmp_dir/mask_brain.raw" ]]; then
-    echo -e "\nThe mask file given with -m could not be read: $mask_method"
-    exit 1
+if [[ -n $mask_file && -f "$abs_tmp_dir/mask_user_failed" ]]; then
+    echo -e "\nThe mask file given with -m could not be read, or holds no brain on the CSI grid: $mask_file"
+    TerminateProgram $DebugFlag 1
 fi
 
 # read -p "Stop before creating B0Map."

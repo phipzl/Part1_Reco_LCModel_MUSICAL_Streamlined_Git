@@ -174,6 +174,9 @@ if [[ $NuisRem_flag -eq 1 ]]; then
 fi
 if [[ $mask_flag -eq 1 ]]; then
 	echo "mask_method = '${mask_method}';" >> $Par
+	if [[ -n ${mask_file:-} ]]; then
+		echo "mask_file = '${mask_file}';" >> $Par
+	fi
 fi
 if [[ $ZeroFillMetMaps_flag -eq 1 ]]; then
 	echo "ZeroFillMetMaps = ${ZeroFillMetMaps};" >> $Par
