@@ -420,13 +420,21 @@ check_julia_deepmrsi_options
 export mask_file=""
 if [[ $mask_flag -eq 1 ]]; then
     case "${mask_method,,}" in
-        bet|bet,*|thresh|thresh,*|voi|dreid*) ;;
+        bet|bet,*|thresh|thresh,*|voi|*dreid*) ;;
         *)
             [[ -f "$mask_method" || ! -f "$calldir/$mask_method" ]] || mask_method="$calldir/$mask_method"
-            [[ -f "$mask_method" ]] || { echo -e "\nThe mask file given with -m does not exist: $mask_method"; exit 1; }
+            if [[ ! -f "$mask_method" ]]; then
+                echo -e "\nThe mask file given with -m does not exist: $mask_method"
+                TerminateProgram $DebugFlag 1
+            fi
             export mask_file=$(readlink -f "$mask_method")
             export mask_method="usermask_bet"
             echo "Mask file: $mask_file"
+            # The MATLAB lipid regularization takes its lipid basis from the BET skull rim,
+            # which a mask file does not bring; it falls back to the whole grid.
+            if [[ ${LipidDecon_flag:-0} -eq 1 && ${julia_reconstruction:-0} -ne 1 && ${LipidDecon_MethodAndNoOfLoops^^} == L[12]* ]]; then
+                echo -e "\nWARNING: with a mask file, the MATLAB L1/L2 lipid removal uses the whole grid as lipid basis."
+            fi
             ;;
     esac
 fi

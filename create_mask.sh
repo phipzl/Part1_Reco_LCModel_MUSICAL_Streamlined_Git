@@ -111,8 +111,13 @@ if [[ $mask_flag -eq 1 ]]; then
     ThreeD_found=$(echo $mask_method | grep -c -i "dreid")
     # A mask file (mask_file, set by Part1_ProcessMRSI.sh) wins over the method names.
     ext_mask=0
-    if [[ -n ${mask_file:-} && -f "$mask_file" ]]; then
-        ext_mask=1; voi_found=0; bet_found=0; thresh_found=0; ThreeD_found=0
+    if [[ -n ${mask_file:-} ]]; then
+        voi_found=0; bet_found=0; thresh_found=0; ThreeD_found=0
+        if [[ -f "$mask_file" ]]; then
+            ext_mask=1
+        else
+            touch ./${tmp_dir}/mask_user_failed
+        fi
     fi
 	if [[ $ThreeD_found > 0 ]]; then
 		echo -e "\n\nWARNING: YOU ARE USING AN OUTDATED MASKING OPTION \"dreid\" WHICH NO LONGER EXISTS.\nSWITCHING TO \"bet\" INSTEAD."
@@ -144,7 +149,7 @@ if [[ $mask_flag -eq 1 ]]; then
 	# A mask file on any grid, for example one made on the anatomical: MINC or NIfTI,
 	# binarised at 0.5 and resampled onto the CSI grids like the BET mask.
 	if [[ $ext_mask -eq 1 ]]; then
-		case "$mask_file" in
+		case "${mask_file,,}" in
 			*.nii.gz) gunzip -c "$mask_file" > ./${tmp_dir}/mask_user.nii ;;
 			*.nii) cp "$mask_file" ./${tmp_dir}/mask_user.nii ;;
 			*) cp "$mask_file" ./${tmp_dir}/mask_user.mnc ;;
