@@ -109,6 +109,11 @@ if [[ $mask_flag -eq 1 ]]; then
     bet_found=$(echo $mask_method | grep -c -i "bet")
     thresh_found=$(echo $mask_method | grep -c -i "thresh")
     ThreeD_found=$(echo $mask_method | grep -c -i "dreid")
+    # A mask file wins over the method names, which a file name may contain (brain_bet_mask.nii.gz).
+    ext_mask=0
+    if [[ -f "$mask_method" ]]; then
+        ext_mask=1; voi_found=0; bet_found=0; thresh_found=0; ThreeD_found=0
+    fi
 	if [[ $ThreeD_found > 0 ]]; then
 		echo -e "\n\nWARNING: YOU ARE USING AN OUTDATED MASKING OPTION \"dreid\" WHICH NO LONGER EXISTS.\nSWITCHING TO \"bet\" INSTEAD."
 		mask_method="bet"
@@ -134,9 +139,34 @@ if [[ $mask_flag -eq 1 ]]; then
 	
 	
 	#############################
+	########  ext. mask  ########
+	#############################
+	# A mask file on any grid, for example one made on the anatomical: MINC or NIfTI,
+	# binarised at 0.5 and resampled onto the CSI grids like the BET mask.
+	if [[ $ext_mask -eq 1 ]]; then
+		case "$mask_method" in
+			*.nii.gz) gunzip -c "$mask_method" > ./${tmp_dir}/mask_user.nii ;;
+			*.nii) cp "$mask_method" ./${tmp_dir}/mask_user.nii ;;
+			*) cp "$mask_method" ./${tmp_dir}/mask_user.mnc ;;
+		esac
+		if [[ -f ./${tmp_dir}/mask_user.nii ]]; then
+			nii2mnc -quiet -clobber ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc
+		fi
+		minccalc -quiet -clobber -float -expression 'A[0] > 0.5 ? 1 : 0' ./${tmp_dir}/mask_user.mnc ./${tmp_dir}/mask_brain_unres.mnc
+		mincresample -clobber -nearest_neighbour -float -like ./${tmp_dir}/csi_template.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain.mnc
+		mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_zf.mnc
+		if [[ $InterpolateCSIResolution_flag -eq 1 ]]; then
+			mincresample -clobber -nearest_neighbour -like ./${tmp_dir}/csi_template_BefInterpol.mnc ./${tmp_dir}/mask_brain_unres.mnc ./${tmp_dir}/mask_brain_BefInterpol.mnc
+			cp ./${tmp_dir}/mask_brain_BefInterpol.mnc ./${tmp_dir}/mask_lipid_BefInterpol.mnc
+		fi
+		# No lipid mask comes with it: as for the threshold mask, the brain mask stands in.
+		cp ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_lipid.mnc
+		rm -f ./${tmp_dir}/mask_user.nii ./${tmp_dir}/mask_user.mnc
+
+	#############################
 	########   B  E  T   ########
 	#############################
-	if [[ $bet_found > 0 ]]; then		# if mask is created with brain extraction tool
+	elif [[ $bet_found > 0 ]]; then		# if mask is created with brain extraction tool
 		
 	# See if the user provided a -f and -g option for bet
 		BetOptionsFound=$(echo $mask_method | grep -ci "bet,\s*")
@@ -260,14 +290,6 @@ if [[ $mask_flag -eq 1 ]]; then
 		fi		
 		# For thresh method, the lipid is useless. Create lipid masks only to avoid if conditions later
 		cp ./${tmp_dir}/mask_brain.mnc ./${tmp_dir}/mask_lipid.mnc				
-
-	#############################
-	########  ext. mask  ########
-	#############################
-	elif [[ "$mask_method" == */*.mnc ]]; then						# if mask is inputted, COPY MASK-FILE TO tmp-FOLDER WITH CORRECT NAME
-
-		mincresample -nearest_neighbour -like ./${tmp_dir}/csi_template_zf.mnc $mask_method ./${tmp_dir}/mask_brain_zf.mnc
-		cp $mask_method ./${tmp_dir}/mask_brain.mnc
 
 	fi	
 	
