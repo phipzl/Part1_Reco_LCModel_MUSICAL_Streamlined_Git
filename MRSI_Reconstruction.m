@@ -40,6 +40,21 @@ end
 
 Par.Settings.Debug_flag = Debug_flag;
 
+% WALRUS and the "Patref" field correction are applied to the finished
+% reconstruction by steps of their own, they are no methods of this function. The
+% flags stay in Parameters.mat, which records what the whole run does, and are
+% cleared here so that the lipid regularization and the frequency alignment below
+% do not run as well.
+if(Par.Flags.LipidDecon_flag && isfield(Par.Settings,'LipidDecon_MethodAndNoOfLoops') && ...
+        ~isempty(regexpi(Par.Settings.LipidDecon_MethodAndNoOfLoops,'^WAL(RUS|INET)','once')))
+    Par.Flags.LipidDecon_flag = 0;
+    Par.Flags.LipidDecon_L1_flag = false;
+end
+if(Par.Flags.AlignFreq_flag && isfield(Par.Settings,'AlignFreq_method') && ...
+        strcmpi(Par.Settings.AlignFreq_method,'Patref'))
+    Par.Flags.AlignFreq_flag = 0;
+end
+
 IsWatRef = false;
 if(Par.Flags.WaterReference_flag && (~exist([Par.Paths.out_path '/WaterReference.mat' ],'file')))
     IsWatRef = true;
@@ -1738,7 +1753,14 @@ end
 %% Save the processed MRSI data for SNR-Computation after LCModel processing
 
 fprintf('\n\nThe MRSI Pre-Processing and Fitting preparations took %10.6f s.\n',toc(CoilCombtic))
-clearvars -except Par csi weights image image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef NoiseCorrMatStruct
+clearvars -except Par csi weights image image_FullFID image_VC mask g_FactorMap NoiseScalingMatrix_spectral NoiseScalingMatrix_time IsWatRef NoiseCorrMatStruct
+
+% The reference scan with all its FID points is several times the size of the CSI,
+% so it is saved only for the steps that read it: the "Patref" field correction
+% and the deep learning fitters.
+if(~(isfield(Par.Settings,'KeepFullFIDImage') && Par.Settings.KeepFullFIDImage))
+    clear image_FullFID
+end
 
 csi.Data = single(csi.Data);
 if(isfield(csi,'NoiseData'))

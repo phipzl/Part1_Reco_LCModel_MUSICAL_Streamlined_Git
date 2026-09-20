@@ -136,6 +136,9 @@ fi
 if [[ $image_normal_flag -eq 1 || $image_VC_flag -eq 1 ]]; then
 	echo "phase_encod_dir_is = '${phase_encoding_direction_is}';" >> $Par
 fi
+if [[ ${KeepFullFIDImage_flag:-0} -eq 1 ]]; then
+	echo "KeepFullFIDImage = 1;" >> $Par
+fi
 if [[ $LipidDecon_flag -eq 1 ]]; then
 	echo "LipidDecon_MethodAndNoOfLoops = '${LipidDecon_MethodAndNoOfLoops}';" >> $Par
 fi

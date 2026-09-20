@@ -96,7 +96,10 @@ def load_reference_and_dwelltime(path):
 
     run_julia_reco.jl stores both beside the CSI: image_FullFID.Data is the
     uncombined PATREFSCAN, which is what the phase difference is measured on,
-    and RecoPar.Dwelltimes is in nanoseconds.
+    and RecoPar.Dwelltimes is in nanoseconds. MRSI_Reconstruction.m stores the
+    same array, and MATLAB drops trailing singleton dimensions when it saves, so
+    a single-channel reference comes back as (x, y, z, t) and gets its channel
+    axis here.
     """
     with h5py.File(path, "r") as f:
         if "image_FullFID/Data" not in f or "csi/RecoPar/Dwelltimes" not in f:
@@ -107,7 +110,10 @@ def load_reference_and_dwelltime(path):
         ref = (raw["real"] + 1j * raw["imag"]).astype(np.complex64)
     else:
         ref = np.asarray(raw, dtype=np.complex64)
-    return ref.transpose(range(ref.ndim)[::-1]), dwelltime
+    ref = ref.transpose(range(ref.ndim)[::-1])
+    if ref.ndim == 4:
+        ref = ref[..., np.newaxis]
+    return ref, dwelltime
 
 
 def read_larmor_hz(combined, tmp_dir):

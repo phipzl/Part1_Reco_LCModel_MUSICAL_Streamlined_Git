@@ -40,7 +40,17 @@ check_julia_deepmrsi_options() {
         matlab_step_failed "-z"
     fi
     if [[ $julia_reconstruction -ne 1 ]]; then
-        refuse_julia_only_options
+        matlab_reconstruction_options
+    fi
+}
+
+# The MATLAB reconstruction with the steps that run after it. What it has to do
+# differently: keep the uncombined reference scan, which -A Patref and the deep
+# fitters measure the field on and which it drops by default because it is
+# several times the size of the CSI.
+matlab_reconstruction_options() {
+    if patref_is_the_alignment || [[ -n $(deepmrsi_fitting) ]]; then
+        export KeepFullFIDImage_flag=1
     fi
 }
 
@@ -221,25 +231,6 @@ julia_lcm_writer_available() {
     [[ -n $(find -L "$MatlabFunctionsFolder" -name julia_write_lcm_files.m -print -quit 2>/dev/null) ]]
 }
 
-# Options only the Julia route implements, refused on the MATLAB reconstruction
-# rather than silently dropped.
-refuse_julia_only_options() {
-    if walrus_is_the_lipid_decon; then
-        echo -e "\nWALRUS through -L is implemented for the Julia reconstruction (-S) only."
-        matlab_step_failed "WALRUS lipid decontamination"
-    fi
-    if patref_is_the_alignment; then
-        echo -e "\n-A Patref is implemented for the Julia reconstruction (-S) only."
-        matlab_step_failed "-A Patref"
-    fi
-    # The MATLAB reconstruction does not keep the reference scan in CombinedCSI.mat,
-    # which deepmrsi needs.
-    if [[ -n $(deepmrsi_fitting) ]]; then
-        echo -e "\n-l $SpectralFitting_Method is implemented for the Julia reconstruction (-S) only."
-        matlab_step_failed "-l $SpectralFitting_Method"
-    fi
-}
-
 # Argument $1: CurAv argument for run_julia_reco.jl
 # Returns non-zero if the configuration is not supported.
 run_julia_reconstruction() {
@@ -315,11 +306,37 @@ run_julia_reconstruction() {
         return 0
     fi
 
-    local Python
+    run_field_and_lipid_steps
+
+    if [[ -n $(deepmrsi_fitting) ]]; then
+        return 0
+    fi
+    write_lcm_files_from_combined
+}
+
+# The LCModel inputs, from CombinedCSI.mat as it stands after the steps above.
+write_lcm_files_from_combined() {
+    if [[ $compiled_matlab_flag -eq 1 ]]; then
+        echo -e "\nRun this command: $MatlabCompiledFunctions/julia_write_lcm_files $abs_tmp_dir"
+        "$MatlabCompiledFunctions/julia_write_lcm_files" "$abs_tmp_dir" || matlab_step_failed julia_write_lcm_files
+    else
+        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir')\""
+        $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir'); catch ME; disp(getReport(ME)); exit(1); end; exit(0)" || matlab_step_failed julia_write_lcm_files
+    fi
+}
+
+# -A Patref and WALRUS, on the finished reconstruction, before anything downstream
+# reads it. Both routes end here: the steps take CombinedCSI.mat, which the MATLAB
+# reconstruction writes in the same layout. A failure stops the run instead of
+# returning, which would report the configuration as unsupported.
+run_field_and_lipid_steps() {
+    patref_is_the_alignment || walrus_is_the_lipid_decon || return 0
+
+    local Python ScriptDir
     Python=$(command -v python3 || command -v python)
-    # -A Patref, on the finished reconstruction, before anything downstream reads it.
-    # A failure here stops the run instead of returning, which would report the
-    # configuration as unsupported.
+    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    write_initial_parameters_json
+
     if patref_is_the_alignment; then
         [[ -n $Python ]] || matlab_step_failed "-A Patref (no python3 or python found)"
         echo -e "\nRun this command: $Python $ScriptDir/apply_b0_patref.py $abs_tmp_dir"
@@ -332,17 +349,38 @@ run_julia_reconstruction() {
         echo -e "\nRun this command: $Python $ScriptDir/walrus_clean_csi.py $abs_tmp_dir $WalrusModel"
         "$Python" "$ScriptDir/walrus_clean_csi.py" "$abs_tmp_dir" "$WalrusModel" || matlab_step_failed walrus_clean_csi.py
     fi
+}
 
-    if [[ -n $(deepmrsi_fitting) ]]; then
-        return 0
+# The same steps after the MATLAB reconstruction, called once the last average is
+# reconstructed. It writes no CombinedCSI.mat for a water reference pass, so there
+# is nothing to correct then either.
+run_matlab_post_reconstruction() {
+    [[ $julia_reconstruction -eq 1 ]] && return 0
+    [[ -f "$out_path/CombinedCSI.mat" ]] || return 0
+    if { patref_is_the_alignment || [[ -n $(deepmrsi_fitting) ]]; } &&
+       ! combined_csi_has_reference; then
+        echo -e "\nThe MATLAB reconstruction did not keep the reference scan in CombinedCSI.mat."
+        echo "    -A Patref and the deep fitters measure the field on it. It is kept when"
+        echo "    KeepFullFIDImage is set, which needs the binaries of this Part1 version."
+        matlab_step_failed "the reference scan in CombinedCSI.mat"
     fi
-    if [[ $compiled_matlab_flag -eq 1 ]]; then
-        echo -e "\nRun this command: $MatlabCompiledFunctions/julia_write_lcm_files $abs_tmp_dir"
-        "$MatlabCompiledFunctions/julia_write_lcm_files" "$abs_tmp_dir" || matlab_step_failed julia_write_lcm_files
-    else
-        echo -e "\nRun this command: $matlabp -nodisplay -r \"addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir')\""
-        $matlabp -nodisplay -r "try; addpath(genpath('$MatlabFunctionsFolder')); julia_write_lcm_files('$abs_tmp_dir'); catch ME; disp(getReport(ME)); exit(1); end; exit(0)" || matlab_step_failed julia_write_lcm_files
+    patref_is_the_alignment || walrus_is_the_lipid_decon || return 0
+    run_field_and_lipid_steps
+    # MRSI_Reconstruction writes the LCModel files inside its own run, before these
+    # steps, so those describe the spectra as they were. Write them again from the
+    # corrected reconstruction, with the same function the Julia route uses.
+    if [[ $SpectralFitting_Method == "LCModel" ]]; then
+        echo -e "\nThe LCModel files were written before -A and -L; writing them again."
+        write_lcm_files_from_combined
     fi
+}
+
+# Whether the reconstruction kept image_FullFID, the uncombined reference scan.
+combined_csi_has_reference() {
+    local Python
+    Python=$(command -v python3 || command -v python) || return 1
+    "$Python" -c "import sys, h5py; sys.exit(0 if 'image_FullFID' in h5py.File(sys.argv[1], 'r') else 1)" \
+        "$out_path/CombinedCSI.mat" 2>/dev/null
 }
 
 # Argument $1: CurAv argument

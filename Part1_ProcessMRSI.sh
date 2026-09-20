@@ -367,7 +367,7 @@ mandatory:
 optional:
 -b  [basis files]       Format: .BASIS. Used for LCM fitting (for FID)
 -a  [T1 AntiNoise images]   Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for pre-masking the T1w image to get rid of the noise in air-areas.
--A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\". \"Patref\" (with -S only) derives the field map from the reference scan, as the online FIRE route does.
+-A  [\"Alignment\" Or \"Alignment,Path\" Or \"Overdiscrete,Path\"]  Perform frequency alignment, either based on a given B0-map or based on a dot-product correlation function. The correction can be also done overdiscrete. If a mnc file is given, use this as B0-map, otherwise shift according to water peak of center voxel. For dicom files, provide the folder with the magnitude images, and the phasemap-difference btw the two TEs, e.g. \"Alignment, B0MagPath B0PhaPath\". \"Patref\" derives the field map from the reference scan, as the online FIRE route does.
 -B  [B1 reading]            Path of B1 DICOM data, used for B1 correction.
 -D  [DebugAdditionalInput]  A general parameter to provide some additional, not specified input for debug purposes. This should not be used in the stable version of the pipeline, but just if you want to test something quickly.
 -e  [LineBroadeningInHz]    Apply an exponential filter to the spectra [Hz].
@@ -380,7 +380,7 @@ optional:
 -I  [\"nextpow2\" or \"[x y z]{,kSpace,Ellip}\"]    If nextpow2: Perform zerofilling to the next power of 2 in ROW and COL dimensions (e.g. from 42x42 to 64x64). If vector (e.g. [16 16 1]): Spatially Interpolate to this size. If \",kspace\" is used, perform interpolation in k-space (cut or zerofill in k-space). If additionally \",Ellip\" is used, the k-space after zerofilling/cutting to [x y z] gets elliptically filtered.
 -j  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. (for FID) otherwise standard values are assumed. A template file is provided in this package.
 -J  [LCM_ControlFile]       ControlFile telling LCModel how to process the data. for ECHO
--L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data. \"WALRUS,[7T|3T]\" (with -S only) removes water and lipids with WALRUS instead; WALINET is accepted as its old name.
+-L  [LipidRegMethod,RegTerm]    Perform lipid regularization after Bilgic et al. Use either \"L2,[RegTerm]\" or \"L1,Iter\" where RegTerm is a value that penalizes the lipid contamination, and Iter is the number of iterations the L1-regularization should be done. Best method is to try different values, bc unfortunately the data is not normalized, and thus very different values might be needed for different data. \"WALRUS,[7T|3T]\" removes water and lipids with WALRUS instead; WALINET is accepted as its old name.
 -m  [mask]                  Defines how to create the mask. Options: -m \"bet{,-f +-x.yz -g +-a.bc}\", \"thresh{,lower_threshold=x}\", \"voi\", \"[Path_to_usermade_mask]\". where things in {} are optional, x is a float defining the lower thresold for masking the magnitude. A usermade mask is a MINC or NIfTI file on any grid (e.g. that of the -t image), binarised at 0.5 and resampled onto the CSI grid. If -m option is not set --> no mask used.
 -n  [NuisRemControlFile]    Perform nuisance removal using hsvd according to Chao et al. The control file must specify the number of singular values, the ppm range for water and lipids and the T2's etc. This file must be in MATLAB-format. Please dont write crap in there causing MATLAB to crash or worse...
 -p  [FLAIR reading]         path of FLAIR DICOM data.
@@ -399,7 +399,7 @@ Flags:
 -F  If this option is set, the spectra are corrected for the first order phase caused by an acquisition delay of the FID-sequences. You must provide a basis set with an appropriate acquisition delay. DONT USE WITH SPIN ECHO SEQUENCES.
 -K	Use compiled MATLAB functions.
         No MATLAB license needed, but the functions must be compiled first (See compile.m)
--l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed. With -S also \"PHIVE\", \"SpatialRegu\" or \"Both\", the fitters of the online FIRE route, maps as NIfTI in [output directory]/maps/Orig_[fitter].
+-l	[\"LCModel\" Or \"DeepLearning\" Or \"None\"]               Default: LCModel. If this option is set to LCModel pipeline runs normally. If set to DeepLearning, the neural network fitting is used. If None, no spectral fitting is performed. Also \"PHIVE\", \"SpatialRegu\" or \"Both\", the fitters of the online FIRE route, maps as NIfTI in [output directory]/maps/Orig_[fitter].
 -d  Debug: keep the temporary directory and the LCModel input files.
 -u  If a phantom was measured. Different settings used for fitting (e.g. some metabolites are omitted)
 
@@ -531,6 +531,8 @@ date
 for ((CurAvg = 1; CurAvg <= NumberOfCSIFiles; CurAvg = CurAvg + 1)); do
     run_mrsi_reconstruction $CurAvg 1
 done
+# -A Patref and WALRUS after the MATLAB reconstruction; the Julia one runs them itself.
+run_matlab_post_reconstruction
 
 # read -rp "Stop before LCModel fitting"
 #7.
