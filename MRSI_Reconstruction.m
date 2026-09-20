@@ -46,10 +46,15 @@ Par.Settings.Debug_flag = Debug_flag;
 % cleared here so that the lipid regularization and the frequency alignment below
 % do not run as well.
 if(Par.Flags.LipidDecon_flag && isfield(Par.Settings,'LipidDecon_MethodAndNoOfLoops') && ...
-        ~isempty(regexpi(Par.Settings.LipidDecon_MethodAndNoOfLoops,'^WAL(RUS|INET)','once')))
+        ~isempty(regexpi(Par.Settings.LipidDecon_MethodAndNoOfLoops,'^WAL(RUS|INET)(,|$)','once')))
     Par.Flags.LipidDecon_flag = 0;
     Par.Flags.LipidDecon_L1_flag = false;
 end
+% Part1 matches the method as written, so an "Alignment" that only differs in case
+% must keep running the frequency alignment here.
+% The alignment below shifts every voxel onto a reference spectrum, which is the
+% same field offset the Patref step measures, so the two never run together. Part1
+% refuses "-A Patref" for the runs that need the alignment to sum their spectra.
 if(Par.Flags.AlignFreq_flag && isfield(Par.Settings,'AlignFreq_method') && ...
         strcmpi(Par.Settings.AlignFreq_method,'Patref'))
     Par.Flags.AlignFreq_flag = 0;

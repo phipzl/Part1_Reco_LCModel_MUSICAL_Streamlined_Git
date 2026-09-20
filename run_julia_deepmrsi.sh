@@ -49,8 +49,50 @@ check_julia_deepmrsi_options() {
 # fitters measure the field on and which it drops by default because it is
 # several times the size of the CSI.
 matlab_reconstruction_options() {
+    local Option
     if patref_is_the_alignment || [[ -n $(deepmrsi_fitting) ]]; then
         export KeepFullFIDImage_flag=1
+        # The reconstruction resizes the CSI for a target grid but not the reference
+        # scan it snapshots before, so the two steps that measure the field on that
+        # scan would work across grids. "-I nextpow2" names no target grid.
+        if [[ ${InterpolateCSIResolution_flag:-0} -eq 1 && ${InterpolateCSIResolution} == *"["* ]]; then
+            echo -e "\n-I with a target grid does not combine with -A Patref or the deep fitters:"
+            echo "    they measure the field on the reference scan, which the MATLAB reconstruction"
+            echo "    leaves on the acquired grid, and the Julia one does not interpolate at all."
+            echo "    Drop -I, or use -A Alignment and LCModel."
+            matlab_step_failed "-I with -A Patref or the deep fitters"
+        fi
+    fi
+    patref_is_the_alignment || walrus_is_the_lipid_decon || return 0
+
+    # Both steps run after the reconstruction, so nothing inside it may depend on
+    # them: Part1's own Walinet and DeepLearning read the spectra there, and the
+    # LCModel files are written there from a water reference and prior knowledge
+    # that the rewrite afterwards does not carry.
+    local Refuse=()
+    [[ ${NuisRem_flag:-0} -eq 1 ]] && Refuse+=("-n (its nuisance removal runs inside the reconstruction)")
+    [[ $SpectralFitting_Method == *DeepLearning* ]] && Refuse+=("-l DeepLearning (it fits inside the reconstruction, before these steps)")
+    if [[ $SpectralFitting_Method == "LCModel" ]]; then
+        [[ ${WaterReference_flag:-0} -eq 1 ]] && Refuse+=("-w (the rewritten LCModel files carry no water reference)")
+        [[ ${priors_flag:-0} -eq 1 ]] && Refuse+=("-P (the rewritten LCModel files carry no prior knowledge)")
+    fi
+    if [[ ${#Refuse[@]} -gt 0 ]]; then
+        echo -e "\nOn the MATLAB reconstruction, -A Patref and -L WALRUS do not combine with:"
+        for Option in "${Refuse[@]}"; do echo "    $Option"; done
+        echo "    Drop the option, or drop -A Patref and -L WALRUS."
+        matlab_step_failed "-A Patref or -L WALRUS on the MATLAB reconstruction"
+    fi
+
+    # Spectra the reconstruction is about to sum are aligned with each other first,
+    # voxel by voxel onto a reference spectrum, which removes the same field offset
+    # the Patref step measures on the reference scan. Correcting it twice is worse
+    # than not correcting it, so the combination is refused.
+    patref_is_the_alignment || return 0
+    if [[ $(grep -oiE "\.dat|\.IMA" <<< "${csi_path:-}" | wc -l) -gt 1 ]]; then
+        echo -e "\nSeveral acquisitions given with -c do not combine with -A Patref on the MATLAB"
+        echo "    reconstruction: it aligns them with each other before it sums them, which"
+        echo "    corrects the same field. Use -A Alignment instead."
+        matlab_step_failed "-A Patref on several acquisitions"
     fi
 }
 
@@ -77,7 +119,9 @@ deepmrsi_fitting() {
 }
 
 patref_is_the_alignment() {
-    [[ ${AlignFreq_flag:-0} -eq 1 ]] && [[ ${AlignFreq_MethodAndPath%%,*} == "Patref" ]]
+    [[ ${AlignFreq_flag:-0} -eq 1 ]] || return 1
+    local Method=${AlignFreq_MethodAndPath%%,*}
+    [[ ${Method,,} == "patref" ]]
 }
 
 # InitialParameters.m is MATLAB source. The Julia and Python steps read the same
@@ -242,6 +286,8 @@ run_julia_reconstruction() {
     [[ $FirstOrderPhaseCorr_flag -eq 1 ]] && OnlyInMatlab+=("-F (first order phase correction)")
     [[ $FirstOrderPhaseModulation_flag -eq 1 ]] && OnlyInMatlab+=("-k (first order phase modulation)")
     [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal, including Walinet; use -L WALRUS)")
+    [[ ${InterpolateCSIResolution_flag:-0} -eq 1 && ${InterpolateCSIResolution} == *"["* ]] &&
+        OnlyInMatlab+=("-I with a target grid (this reconstruction stays on the acquired one)")
     [[ $SpectralFitting_Method == *DeepLearning* ]] && OnlyInMatlab+=("-l DeepLearning (use -l PHIVE)")
 
     if [[ ${#OnlyInMatlab[@]} -gt 0 ]]; then
@@ -356,7 +402,9 @@ run_field_and_lipid_steps() {
 # is nothing to correct then either.
 run_matlab_post_reconstruction() {
     [[ $julia_reconstruction -eq 1 ]] && return 0
-    [[ -f "$out_path/CombinedCSI.mat" ]] || return 0
+    patref_is_the_alignment || walrus_is_the_lipid_decon || [[ -n $(deepmrsi_fitting) ]] || return 0
+    [[ -f "$out_path/CombinedCSI.mat" ]] ||
+        matlab_step_failed "the MATLAB reconstruction, which wrote no $out_path/CombinedCSI.mat"
     if { patref_is_the_alignment || [[ -n $(deepmrsi_fitting) ]]; } &&
        ! combined_csi_has_reference; then
         echo -e "\nThe MATLAB reconstruction did not keep the reference scan in CombinedCSI.mat."
@@ -368,19 +416,30 @@ run_matlab_post_reconstruction() {
     run_field_and_lipid_steps
     # MRSI_Reconstruction writes the LCModel files inside its own run, before these
     # steps, so those describe the spectra as they were. Write them again from the
-    # corrected reconstruction, with the same function the Julia route uses.
+    # corrected reconstruction, with the same function the Julia route uses. Its batch
+    # script is appended to, so the first one goes: two lines in it fit every voxel
+    # twice, at the same time, into the same files.
     if [[ $SpectralFitting_Method == "LCModel" ]]; then
         echo -e "\nThe LCModel files were written before -A and -L; writing them again."
+        rm -f "$abs_tmp_dir/lcm_process_core_parallel.sh"
         write_lcm_files_from_combined
     fi
 }
 
-# Whether the reconstruction kept image_FullFID, the uncombined reference scan.
+# Whether the reconstruction kept image_FullFID, the uncombined reference scan. A
+# file that cannot be read is reported as that, not as a missing reference scan.
 combined_csi_has_reference() {
-    local Python
-    Python=$(command -v python3 || command -v python) || return 1
-    "$Python" -c "import sys, h5py; sys.exit(0 if 'image_FullFID' in h5py.File(sys.argv[1], 'r') else 1)" \
-        "$out_path/CombinedCSI.mat" 2>/dev/null
+    local Python Answer
+    Python=$(command -v python3 || command -v python)
+    [[ -n $Python ]] || matlab_step_failed "the reference scan check (no python3 or python found)"
+    Answer=$("$Python" -c "
+import sys, h5py
+with h5py.File(sys.argv[1], 'r') as Combined:
+    print('yes' if 'image_FullFID' in Combined else 'no')
+" "$out_path/CombinedCSI.mat" 2>"$abs_tmp_dir/reference_probe.err") ||
+        matlab_step_failed "reading $out_path/CombinedCSI.mat: $(tail -3 "$abs_tmp_dir/reference_probe.err")"
+    # A warning on the way out of h5py is not an answer, so only the last line counts.
+    [[ ${Answer##*$'\n'} == "yes" ]]
 }
 
 # Argument $1: CurAv argument
