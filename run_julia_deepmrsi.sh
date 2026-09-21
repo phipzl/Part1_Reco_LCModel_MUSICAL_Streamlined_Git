@@ -63,6 +63,17 @@ matlab_reconstruction_options() {
             matlab_step_failed "-I with -A Patref or the deep fitters"
         fi
     fi
+    # Every -A method other than Patref is applied inside the reconstruction, which
+    # writes no record of it, so the fitters would measure the field on the reference
+    # scan and correct it a second time.
+    if [[ -n $(deepmrsi_fitting) ]] && [[ ${AlignFreq_flag:-0} -eq 1 ]] && ! patref_is_the_alignment; then
+        local Method=${AlignFreq_MethodAndPath%%,*}
+        [[ -n $Method ]] || Method="(empty)"
+        echo -e "\n-A $Method does not combine with -l $SpectralFitting_Method on the MATLAB"
+        echo "    reconstruction: it aligns the spectra itself and leaves no record, so the"
+        echo "    fitter would correct the field again. Use -A Patref, or fit with LCModel."
+        matlab_step_failed "-A $Method with -l $SpectralFitting_Method"
+    fi
     patref_is_the_alignment || walrus_is_the_lipid_decon || return 0
 
     # Both steps run after the reconstruction, so nothing inside it may depend on
