@@ -16,12 +16,16 @@ if(~isfield(Par, 'ServerInfo') || ~isfield(Par.ServerInfo,'RunLCModel_CPUCores')
 end
 
 Data.csi = LoadJuliaCSI(Par);
+Data = AddWaterReference(Data, Par);
 mask = LoadMask(tmp_dir, Par);
 
 Paths.out_dir = [Par.Paths.out_path '/spectra'];
 Paths.basis_file = Par.Paths.basis_path;
 Paths.LCM_ProgramPath = Par.Paths.LCM_Path;
 Paths.batchdir = tmp_dir;
+if(Par.Flags.priors_flag)
+    Paths.priors_dir = PriorsDirectory(Par);
+end
 
 MetaInfo.DimNames = {'x','y','z'};
 MetaInfo.pat_name = Par.CSI.PatName;
@@ -57,6 +61,80 @@ if(~isfield(Loaded,'csi') || ~isfield(Loaded.csi,'Data'))
           '%s does not contain csi.Data.', CombinedPath);
 end
 csi = Loaded.csi.Data;
+
+end
+
+
+
+function PriorsDir = PriorsDirectory(Par)
+% The three prior maps -P points at, as raw files. Write_LCM_files reports a missing
+% one through a file handle it never opens, so the check is made here.
+
+PriorsDir = Par.Paths.priors_path;
+for Name = {'0_pha_map', '1_pha_map', 'shift_map'}
+    if(~exist([PriorsDir '/' Name{1} '.raw'],'file'))
+        error('julia_write_lcm_files:MissingPrior', ...
+              'The prior knowledge directory %s has no %s.raw.', PriorsDir, Name{1});
+    end
+end
+
+end
+
+
+
+function Data = AddWaterReference(Data, Par)
+% W1 hands LCModel the water FID of every voxel, which it scales the fit by.
+% Write_LCM_files takes it as the array Data.watref on the grid of the spectra
+% and zero-fills it to their length; the water pass left it in WaterReference.mat
+% as WaterReferenceCSI, with Data and, from the Julia pass, RecoPar.Dwelltimes.
+
+if(~(Par.Flags.WaterReference_flag && strcmp(Par.Settings.WaterReference_method,'W1')))
+    return
+end
+WaterPath = [Par.Paths.out_path '/WaterReference.mat'];
+if(~exist(WaterPath,'file'))
+    error('julia_write_lcm_files:MissingWater', ...
+          'W1 water referencing was asked for, but the water pass left no %s.', WaterPath);
+end
+Loaded = load(WaterPath,'WaterReferenceCSI');
+Water = Loaded.WaterReferenceCSI;
+if(~isfield(Water,'Data'))
+    error('julia_write_lcm_files:BadWater', '%s carries no WaterReferenceCSI.Data.', WaterPath);
+end
+
+% LCModel reads the water file with the parameters of the spectra: same voxel, same
+% dwell time. A water reference acquired on another grid or bandwidth has to be
+% brought onto them first, which nothing here does.
+WaterGrid = [size(Water.Data,1) size(Water.Data,2) size(Water.Data,3)];
+CsiGrid = [size(Data.csi,1) size(Data.csi,2) size(Data.csi,3)];
+if(~isequal(WaterGrid, CsiGrid))
+    error('julia_write_lcm_files:WaterGrid', ...
+          ['The water reference is on a %s grid and the spectra on %s. W1 scales voxel ' ...
+           'by voxel, so the two have to share the grid.'], mat2str(WaterGrid), mat2str(CsiGrid));
+end
+% Write_LCM_files zero-fills a shorter water FID to the spectra's length but does not
+% cut a longer one, and LCModel reads the file with the spectra's point count.
+if(size(Water.Data,4) > size(Data.csi,4))
+    error('julia_write_lcm_files:WaterLength', ...
+          ['The water reference has %d points per voxel and the spectra %d. LCModel reads ' ...
+           'the water file with the latter, so the longer one has to be cut first.'], ...
+          size(Water.Data,4), size(Data.csi,4));
+end
+WaterDwell = [];
+if(isfield(Water,'RecoPar') && isfield(Water.RecoPar,'Dwelltimes'))
+    WaterDwell = Water.RecoPar.Dwelltimes(1);
+elseif(isfield(Water,'Par') && isfield(Water.Par,'Dwelltimes'))
+    WaterDwell = Water.Par.Dwelltimes(1);
+end
+% The two values come from different readers, one of which rounds to 10 us, so only
+% a different bandwidth counts, not two roundings of the same one.
+if(~isempty(WaterDwell) && abs(WaterDwell - Par.CSI.Dwelltimes(1)) > max(0.02 * Par.CSI.Dwelltimes(1), 5000))
+    error('julia_write_lcm_files:WaterDwell', ...
+          ['The water reference was sampled with a dwell time of %g ns and the spectra ' ...
+           'with %g ns. LCModel reads both with the latter, so the water area would be off.'], ...
+          WaterDwell, Par.CSI.Dwelltimes(1));
+end
+Data.watref = Water.Data;
 
 end
 

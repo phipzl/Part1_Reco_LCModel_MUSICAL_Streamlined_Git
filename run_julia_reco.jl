@@ -83,11 +83,15 @@ function write_water_reference(path, dat_file, csi_data, recon_kw)
     end
     println("Julia: coil weights from FID point $MATLAB_REF_POINT, method $combine_method")
     println("Julia: writing $path")
+    # RecoPar.Dwelltimes lets julia_write_lcm_files refuse a water reference LCModel
+    # would read with the wrong bandwidth.
     matwrite(path, Dict(
         "weights" => Dict("Data" => weights),
         "WaterReferenceCSI" => Dict(
             "Data" => csi_data,
-            "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]))))
+            "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]),
+            "RecoPar" => Dict("Dwelltimes" => float(scan_info[:ONLINE][:dwelltime]),
+                              "vecSize" => float(size(csi_data, ndims(csi_data)))))))
 end
 
 """What deep_crt_mrsi.combined_csi reads out of a CombinedCSI.mat.
@@ -197,11 +201,11 @@ if get(p, "WaterReference_flag", 0) == 1 && !isfile(joinpath(out_path, "WaterRef
 end
 
 if is_water_ref
-    # "Method,/path/to/file" or just "Method", in which case the metabolite file is used
+    # The water file is the last comma-separated field, as GetPar_CreateTempl_MaskPart1.m
+    # reads it: "W1,/path/to/file", or a bare path whose name carries the method. GetPar
+    # has already checked that it exists.
     watref_setting = get(p, "WaterReference_MethodAndFile", "")
-    parts = split(watref_setting, ',')
-    dat_file = length(parts) >= 2 ? strip(parts[2]) : csi_paths[1]
-    isempty(dat_file) && (dat_file = csi_paths[1])
+    dat_file = String(strip(last(split(watref_setting, ','))))
 else
     dat_file = csi_paths[clamp(cur_avg, 1, n_files)]
 end
@@ -303,25 +307,37 @@ coil_weights = is_water_ref ? nothing : stored_coil_weights(watref_path)
 isnothing(coil_weights) || println("Julia: combining with the water reference coil weights")
 
 ice_patref = nothing
-result = if parity_mode == "matlab"
-    scan_info = MRSI.read_scan_info(dat_file)
-    # Berni combines a single channel with unit-magnitude weights (Phase VC),
-    # not MUSICAL, and the choice changes the result rather than only its scale.
-    combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
-    MRSI.reconstruct(dat_file; common_kw..., matlab_kw..., combine_method, coil_weights)
-else
-    # reconstruct_like_ICE is the entry point ICE parity was established against:
-    # it reads alICEProgramPara for the frequency offset, the drift and the
-    # trajectory delays, exactly as ICE's Configurator does. Calling it is what
-    # makes this mode ICE-equivalent; mirroring its choices here would be a
-    # second copy to drift out of sync. prescan=false because Part1 has no use
-    # for the reconstructed PATREFANDIMASCAN and it is not free.
-    reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., coil_weights)
-    # Keep the reference scan it already reconstructed: reconstruct_uncombined
-    # would redo it through plain reconstruct, without the protocol gating, and
-    # the field map would then come from a different reference than the data.
-    global ice_patref = get(reco, :PATREFSCAN_UNCOMBINED, nothing)
-    reco[:ONLINE]
+result = try
+    if parity_mode == "matlab"
+        scan_info = MRSI.read_scan_info(dat_file)
+        # Berni combines a single channel with unit-magnitude weights (Phase VC),
+        # not MUSICAL, and the choice changes the result rather than only its scale.
+        combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
+        MRSI.reconstruct(dat_file; common_kw..., matlab_kw..., combine_method, coil_weights)
+    else
+        # reconstruct_like_ICE is the entry point ICE parity was established against:
+        # it reads alICEProgramPara for the frequency offset, the drift and the
+        # trajectory delays, exactly as ICE's Configurator does. Calling it is what
+        # makes this mode ICE-equivalent; mirroring its choices here would be a
+        # second copy to drift out of sync. prescan=false because Part1 has no use
+        # for the reconstructed PATREFANDIMASCAN and it is not free.
+        reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., coil_weights)
+        # Keep the reference scan it already reconstructed: reconstruct_uncombined
+        # would redo it through plain reconstruct, without the protocol gating, and
+        # the field map would then come from a different reference than the data.
+        global ice_patref = get(reco, :PATREFSCAN_UNCOMBINED, nothing)
+        reco[:ONLINE]
+    end
+catch err
+    # The water reference's weights are per voxel of its own grid and per channel of
+    # its own compression. A DimensionMismatch deep in the combination says nothing
+    # about either, so the context goes first and the error keeps its trace.
+    if !isnothing(coil_weights) && err isa DimensionMismatch
+        @error "The coil weights from $watref_path have size $(size(coil_weights)) " *
+               "(grid, 1, channels). A water reference acquired on another grid or with " *
+               "another coil compression cannot combine $dat_file."
+    end
+    rethrow()
 end
 
 # MRSI.reconstruct returns the CSI array of the single repetition, but the Vector of

@@ -77,15 +77,19 @@ matlab_reconstruction_options() {
     patref_is_the_alignment || walrus_is_the_lipid_decon || return 0
 
     # Both steps run after the reconstruction, so nothing inside it may depend on
-    # them: Part1's own Walinet and DeepLearning read the spectra there, and the
-    # LCModel files are written there from a water reference and prior knowledge
-    # that the rewrite afterwards does not carry.
+    # them: Part1's own Walinet and DeepLearning read the spectra there. With LCModel,
+    # the reconstruction also writes the LCModel files there: a W2 water pass writes
+    # its water spectra and queues them in a batch line the rewrite replaces, and W1
+    # is dropped by that first write but carried by the rewrite, so the same flags
+    # would scale the fit or not depending on -A and -L.
     local Refuse=()
     [[ ${NuisRem_flag:-0} -eq 1 ]] && Refuse+=("-n (its nuisance removal runs inside the reconstruction)")
     [[ $SpectralFitting_Method == *DeepLearning* ]] && Refuse+=("-l DeepLearning (it fits inside the reconstruction, before these steps)")
-    if [[ $SpectralFitting_Method == "LCModel" ]]; then
-        [[ ${WaterReference_flag:-0} -eq 1 ]] && Refuse+=("-w (the rewritten LCModel files carry no water reference)")
-        [[ ${priors_flag:-0} -eq 1 ]] && Refuse+=("-P (the rewritten LCModel files carry no prior knowledge)")
+    if [[ $SpectralFitting_Method == "LCModel" && ${WaterReference_flag:-0} -eq 1 ]]; then
+        case "$(water_reference_method)" in
+            W2) Refuse+=("-w W2 (its water spectra are written and queued inside the reconstruction)") ;;
+            *)  Refuse+=("-w W1 (the reconstruction's own LCModel files carry no water reference, the rewritten ones would)") ;;
+        esac
     fi
     if [[ ${#Refuse[@]} -gt 0 ]]; then
         echo -e "\nOn the MATLAB reconstruction, -A Patref and -L WALRUS do not combine with:"
@@ -126,6 +130,16 @@ deepmrsi_fitting() {
         phive) echo dlfit ;;
         spatialregu) echo gpufit ;;
         both) echo both ;;
+    esac
+}
+
+# W1, W2 or empty, classified the way GetPar_CreateTempl_MaskPart1.m does: by the
+# first of the two names found anywhere in the -w argument, path included.
+water_reference_method() {
+    [[ ${WaterReference_flag:-0} -eq 1 ]] || return 0
+    case "$WaterReference_MethodAndFile" in
+        *W1*) echo W1 ;;
+        *W2*) echo W2 ;;
     esac
 }
 
@@ -319,7 +333,7 @@ run_julia_reconstruction() {
         echo "    acquisition, or drop -S."
         return 1
     fi
-    if [[ $WaterReference_flag -eq 1 ]] && [[ ${WaterReference_MethodAndFile%%,*} != "W1" ]]; then
+    if [[ $WaterReference_flag -eq 1 ]] && [[ $(water_reference_method) != "W1" ]]; then
         echo -e "\nThe Julia reconstruction supports W1 water referencing only. W2 fits the"
         echo "    water separately, which needs its own LCModel files written for it."
         return 1
