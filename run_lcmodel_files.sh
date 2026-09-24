@@ -53,5 +53,12 @@ else
 fi
 
 tables=$(find "$spectra" -maxdepth 1 -name '*.table' | wc -l)
-echo "Done: $tables tables for $n voxels."
-[[ $tables -gt 0 ]]
+# LCModel writes a table for a voxel it could not fit too, with FATAL in its $$DIAG
+# section, so the table count alone says nothing about success.
+# grep exits 1 when no table is FATAL, which pipefail would turn into a failure.
+fatal=$(set +o pipefail; find "$spectra" -maxdepth 1 -name '*.table' -print0 | xargs -0 -r grep -l -F FATAL | wc -l)
+echo "Done: $tables tables for $n voxels, $fatal of them FATAL."
+if (( tables == 0 || 2 * fatal > tables )); then
+    echo "LCModel failed in most voxels; the \$\$DIAG section of any table names the error." >&2
+    exit 1
+fi
