@@ -7,7 +7,10 @@ function julia_write_lcm_files(tmp_dir)
 % MRSI_Reconstruction writes for the MATLAB route.
 %
 % The metadata is taken from Parameters.mat rather than from the Julia output, so
-% both routes describe the spectra with the same header values.
+% both routes describe the spectra with the same header values. The dwell time is
+% the exception: read_ascconv doubles alDwellTime for every rollercoaster sequence,
+% while the Julia reconstruction applies the readout oversampling factor the header
+% states, and its value is the one the spectra were sampled with.
 
 load([tmp_dir '/Parameters.mat'],'Par')
 
@@ -15,8 +18,8 @@ if(~isfield(Par, 'ServerInfo') || ~isfield(Par.ServerInfo,'RunLCModel_CPUCores')
     Par.ServerInfo.RunLCModel_CPUCores = 20;
 end
 
-Data.csi = LoadJuliaCSI(Par);
-Data = AddWaterReference(Data, Par);
+[Data.csi, Dwelltime] = LoadJuliaCSI(Par);
+Data = AddWaterReference(Data, Par, Dwelltime);
 mask = LoadMask(tmp_dir, Par);
 
 Paths.out_dir = [Par.Paths.out_path '/spectra'];
@@ -30,7 +33,7 @@ end
 MetaInfo.DimNames = {'x','y','z'};
 MetaInfo.pat_name = Par.CSI.PatName;
 MetaInfo.LarmorFreq = Par.CSI.LarmorFreq;
-MetaInfo.dwelltime = Par.CSI.Dwelltimes(1);
+MetaInfo.dwelltime = Dwelltime;
 
 if(isfield(Par.Paths,'LCM_ControlPath'))
     ControlInfo = Par.Paths.LCM_ControlPath;
@@ -44,9 +47,10 @@ end
 
 
 
-function csi = LoadJuliaCSI(Par)
+function [csi, Dwelltime] = LoadJuliaCSI(Par)
 % run_julia_reco.jl stores the array as csi.Data, the field MRSI_Reconstruction
-% uses, so the same variable serves both routes.
+% uses, so the same variable serves both routes, and its dwell time in ns as
+% csi.RecoPar.Dwelltimes.
 
 CombinedPath = [Par.Paths.out_path '/CombinedCSI.mat'];
 if(~exist(CombinedPath,'file'))
@@ -61,6 +65,15 @@ if(~isfield(Loaded,'csi') || ~isfield(Loaded.csi,'Data'))
           '%s does not contain csi.Data.', CombinedPath);
 end
 csi = Loaded.csi.Data;
+
+Dwelltime = Par.CSI.Dwelltimes(1);
+if(isfield(Loaded.csi,'RecoPar') && isfield(Loaded.csi.RecoPar,'Dwelltimes'))
+    Dwelltime = double(Loaded.csi.RecoPar.Dwelltimes(1));
+    if(abs(Dwelltime - Par.CSI.Dwelltimes(1)) > max(0.02 * Dwelltime, 5000))
+        fprintf(['\nThe header reader gives a dwell time of %g ns, the Julia reconstruction ' ...
+                 '%g ns. The LCModel files use the latter.\n'], Par.CSI.Dwelltimes(1), Dwelltime);
+    end
+end
 
 end
 
@@ -82,7 +95,7 @@ end
 
 
 
-function Data = AddWaterReference(Data, Par)
+function Data = AddWaterReference(Data, Par, Dwelltime)
 % W1 hands LCModel the water FID of every voxel, which it scales the fit by.
 % Write_LCM_files takes it as the array Data.watref on the grid of the spectra
 % and zero-fills it to their length; the water pass left it in WaterReference.mat
@@ -128,11 +141,11 @@ elseif(isfield(Water,'Par') && isfield(Water.Par,'Dwelltimes'))
 end
 % The two values come from different readers, one of which rounds to 10 us, so only
 % a different bandwidth counts, not two roundings of the same one.
-if(~isempty(WaterDwell) && abs(WaterDwell - Par.CSI.Dwelltimes(1)) > max(0.02 * Par.CSI.Dwelltimes(1), 5000))
+if(~isempty(WaterDwell) && abs(WaterDwell - Dwelltime) > max(0.02 * Dwelltime, 5000))
     error('julia_write_lcm_files:WaterDwell', ...
           ['The water reference was sampled with a dwell time of %g ns and the spectra ' ...
            'with %g ns. LCModel reads both with the latter, so the water area would be off.'], ...
-          WaterDwell, Par.CSI.Dwelltimes(1));
+          WaterDwell, Dwelltime);
 end
 Data.watref = Water.Data;
 
