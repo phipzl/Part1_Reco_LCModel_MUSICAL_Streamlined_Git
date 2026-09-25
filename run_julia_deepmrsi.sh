@@ -79,17 +79,14 @@ matlab_reconstruction_options() {
     # Both steps run after the reconstruction, so nothing inside it may depend on
     # them: Part1's own Walinet and DeepLearning read the spectra there. With LCModel,
     # the reconstruction also writes the LCModel files there: a W2 water pass writes
-    # its water spectra and queues them in a batch line the rewrite replaces, and W1
-    # is dropped by that first write but carried by the rewrite, so the same flags
-    # would scale the fit or not depending on -A and -L.
+    # its water spectra and queues them in a batch line the rewrite replaces. W1 is
+    # carried by both writes: the rewrite takes the water the reconstruction left in
+    # WaterReference.mat.
     local Refuse=()
     [[ ${NuisRem_flag:-0} -eq 1 ]] && Refuse+=("-n (its nuisance removal runs inside the reconstruction)")
     [[ $SpectralFitting_Method == *DeepLearning* ]] && Refuse+=("-l DeepLearning (it fits inside the reconstruction, before these steps)")
-    if [[ $SpectralFitting_Method == "LCModel" && ${WaterReference_flag:-0} -eq 1 ]]; then
-        case "$(water_reference_method)" in
-            W2) Refuse+=("-w W2 (its water spectra are written and queued inside the reconstruction)") ;;
-            *)  Refuse+=("-w W1 (the reconstruction's own LCModel files carry no water reference, the rewritten ones would)") ;;
-        esac
+    if [[ $SpectralFitting_Method == "LCModel" && ${WaterReference_flag:-0} -eq 1 && $(water_reference_method) == "W2" ]]; then
+        Refuse+=("-w W2 (its water spectra are written and queued inside the reconstruction)")
     fi
     if [[ ${#Refuse[@]} -gt 0 ]]; then
         echo -e "\nOn the MATLAB reconstruction, -A Patref and -L WALRUS do not combine with:"

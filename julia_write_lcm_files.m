@@ -8,9 +8,8 @@ function julia_write_lcm_files(tmp_dir)
 %
 % The metadata is taken from Parameters.mat rather than from the Julia output, so
 % both routes describe the spectra with the same header values. The dwell time is
-% the exception: read_ascconv doubles alDwellTime for every rollercoaster sequence,
-% while the Julia reconstruction applies the readout oversampling factor the header
-% states, and its value is the one the spectra were sampled with.
+% the exception: the Julia reconstruction's value is the one the spectra were sampled
+% with, which MRSI.jl takes from the ADC dwell where the protocol states another.
 
 load([tmp_dir '/Parameters.mat'],'Par')
 
@@ -109,7 +108,21 @@ if(~exist(WaterPath,'file'))
     error('julia_write_lcm_files:MissingWater', ...
           'W1 water referencing was asked for, but the water pass left no %s.', WaterPath);
 end
-Loaded = load(WaterPath,'WaterReferenceCSI');
+% The MATLAB reconstruction leaves the water it gave LCModel, already on the grid and in
+% the amplitude scale of the spectra. Write the same one again.
+Loaded = load(WaterPath);
+if(isfield(Loaded,'WaterReferenceOnCSIGrid'))
+    if(~isequal(size(Loaded.WaterReferenceOnCSIGrid,1:3), size(Data.csi,1:3)))
+        error('julia_write_lcm_files:WaterGrid', ...
+              'WaterReferenceOnCSIGrid in %s is on a %s grid and the spectra on %s.', ...
+              WaterPath, mat2str(size(Loaded.WaterReferenceOnCSIGrid,1:3)), mat2str(size(Data.csi,1:3)));
+    end
+    Data.watref = Loaded.WaterReferenceOnCSIGrid;
+    return
+end
+if(~isfield(Loaded,'WaterReferenceCSI'))
+    error('julia_write_lcm_files:BadWater', '%s carries no WaterReferenceCSI.', WaterPath);
+end
 Water = Loaded.WaterReferenceCSI;
 if(~isfield(Water,'Data'))
     error('julia_write_lcm_files:BadWater', '%s carries no WaterReferenceCSI.Data.', WaterPath);
