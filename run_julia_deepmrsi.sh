@@ -311,8 +311,10 @@ run_julia_reconstruction() {
     [[ $FirstOrderPhaseCorr_flag -eq 1 ]] && OnlyInMatlab+=("-F (first order phase correction)")
     [[ $FirstOrderPhaseModulation_flag -eq 1 ]] && OnlyInMatlab+=("-k (first order phase modulation)")
     [[ $NuisRem_flag -eq 1 ]] && OnlyInMatlab+=("-n (nuisance removal, including Walinet; use -L WALRUS)")
-    [[ ${InterpolateCSIResolution_flag:-0} -eq 1 && ${InterpolateCSIResolution} == *"["* ]] &&
-        OnlyInMatlab+=("-I with a target grid (this reconstruction stays on the acquired one)")
+    # "-I nextpow2" too: GetPar then sizes the templates and the mask for the header's final
+    # matrix, which this reconstruction never produces.
+    [[ ${InterpolateCSIResolution_flag:-0} -eq 1 ]] &&
+        OnlyInMatlab+=("-I (this reconstruction stays on the acquired grid)")
     [[ $SpectralFitting_Method == *DeepLearning* ]] && OnlyInMatlab+=("-l DeepLearning (use -l PHIVE)")
 
     if [[ ${#OnlyInMatlab[@]} -gt 0 ]]; then
