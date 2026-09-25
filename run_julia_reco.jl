@@ -13,12 +13,14 @@
 #
 # Written to out_path:
 #   julia_csi.raw        accumulated complex float32, interleaved Re/Im, [Nx,Ny,Nz,Nt]
-#   julia_csi_watref.raw same layout, water reference only
+#   julia_csi_watref.raw same layout, water reference only, on its own grid
 #   CombinedCSI.mat      csi.Data, the array MRSI_Reconstruction stores under the same
 #                        name, read by julia_write_lcm_files on the MATLAB side
 #   WaterReference.mat   weights.Data and WaterReferenceCSI, written on the water pass
 #                        in the layout MRSI_Reconstruction.m uses, so either pipeline
-#                        can read the other's coil weights
+#                        can read the other's coil weights; WaterReferenceCSI.Data is on
+#                        the metabolite grid, and channel_mixing_matrix is the channel
+#                        mixing both passes reconstruct with
 # Written to tmp_dir:
 #   julia_recoinfo.m     CSI dimensions, read by julia_write_lcm_files on the MATLAB side
 
@@ -66,33 +68,91 @@ end
 # interchangeable with the ones it stores.
 const MATLAB_REF_POINT = 4
 
-"""Weights and data of the water reference, in the layout MRSI_Reconstruction.m writes:
-`weights.Data` is the raw conj of the reference, and `WaterReferenceCSI` carries the
-coil-compression count the metabolite pass compares against its own."""
-function write_water_reference(path, dat_file, csi_data, recon_kw)
-    scan_info = MRSI.read_scan_info(dat_file)
-    # MRSI_Reconstruction.m picks the method by channel count: MUSICAL at `:963`,
-    # and the phase-only "Phase VC" branch at `:968` for a single channel. Deriving
-    # with the wrong one gives weights that are simply different, not slightly off.
-    combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
-    weights = MRSI.coil_combine_weights(dat_file; ref_point_for_combine=MATLAB_REF_POINT,
-                                        combine_method, recon_kw...)
-    if isnothing(weights)
-        @warn "The water reference has no PATREFSCAN, so it cannot supply coil weights"
-        return
-    end
-    println("Julia: coil weights from FID point $MATLAB_REF_POINT, method $combine_method")
+"""How MRSI_Reconstruction.m combines a scan: MUSICAL at `:963`, or the phase-only
+"Phase VC" branch at `:968` for a single channel. Deriving with the wrong one gives
+weights that are simply different, not slightly off."""
+combine_method_of(file) = MRSI.read_scan_info(file)[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
+
+"""WaterReference.mat in the layout MRSI_Reconstruction.m writes. `WaterReferenceCSI`
+carries the coil-compression count the metabolite pass compares against its own, and the
+water signal as W1 reads it: on the metabolite grid, scaled by `gain_ratio`."""
+function write_water_reference(path, weights, water_csi, mixing, water_info, gain_ratio)
     println("Julia: writing $path")
     # RecoPar.Dwelltimes lets julia_write_lcm_files refuse a water reference LCModel
     # would read with the wrong bandwidth.
-    matwrite(path, Dict(
+    contents = Dict{String,Any}(
         "weights" => Dict("Data" => weights),
         "WaterReferenceCSI" => Dict(
-            "Data" => csi_data,
-            "Par" => Dict("coilcompression_to_numb_coils" => scan_info[:n_compressed_coils]),
-            "RecoPar" => Dict("Dwelltimes" => float(scan_info[:ONLINE][:dwelltime]),
-                              "vecSize" => float(size(csi_data, ndims(csi_data)))))))
+            "Data" => water_csi,
+            "Par" => Dict("coilcompression_to_numb_coils" => water_info[:n_compressed_coils],
+                          "AcquiredMatrix" => float.(collect(matrix_size(water_info))),
+                          "ReconstructionGainRatio" => gain_ratio),
+            "RecoPar" => Dict("Dwelltimes" => float(water_info[:ONLINE][:dwelltime]),
+                              "vecSize" => float(size(water_csi, ndims(water_csi))))))
+    isnothing(mixing) || (contents["channel_mixing_matrix"] = mixing)
+    matwrite(path, contents)
 end
+
+"""The channel mixing a water pass stored with its weights, or `nothing`."""
+function stored_channel_mixing(path)
+    isfile(path) || return nothing
+    mixing = get(matread(path), "channel_mixing_matrix", nothing)
+    isnothing(mixing) && return nothing
+    # matread returns a 1x1 matrix as a scalar
+    return mixing isa Number ? fill(ComplexF64(mixing), 1, 1) : Matrix{ComplexF64}(mixing)
+end
+
+"""The water file of `-w`, the last comma-separated field, as GetPar_CreateTempl_MaskPart1.m
+reads it: "W1,/path/to/file", or a bare path whose name carries the method."""
+water_reference_file(p) = String(strip(last(split(get(p, "WaterReference_MethodAndFile", ""), ','))))
+
+"""(nx, ny, nz) of the reconstructed CSI."""
+matrix_size(scan_info) =
+    (scan_info[:ONLINE][:n_frequency], scan_info[:ONLINE][:n_frequency], scan_info[:ONLINE][:n_part])
+
+# How far two FOVs may differ for a k-space resize between them
+const FOV_TOLERANCE_MM = 0.1
+const FOV_TOLERANCE_RAD = 1e-3
+
+"""Refuse a water reference that does not cover the metabolite scan's FOV. Zero-filling
+or cutting k-space moves data between matrices of one FOV only; another FOV or slab
+needs resampling in world coordinates, which this route does not do."""
+function check_same_fov(met_info, water_info, met_file, water_file)
+    differences = String[]
+    for key in (:fov_readout, :fov_phase, :fov_slice)
+        abs(met_info[key] - water_info[key]) <= FOV_TOLERANCE_MM ||
+            push!(differences, "$key $(met_info[key]) vs $(water_info[key]) mm")
+    end
+    shift = sqrt(sum(abs2, met_info[:position] .- water_info[:position]))
+    shift <= FOV_TOLERANCE_MM || push!(differences, "centres $(round(shift; digits=2)) mm apart")
+    n1, n2 = met_info[:slice_normal], water_info[:slice_normal]
+    tilt = acos(clamp(sum(n1 .* n2) / sqrt(sum(abs2, n1) * sum(abs2, n2)), -1, 1))
+    tilt <= FOV_TOLERANCE_RAD || push!(differences, "slab normals $(round(rad2deg(tilt); digits=3)) deg apart")
+    rotation = abs(rem2pi(met_info[:in_plane_rotation] - water_info[:in_plane_rotation], RoundNearest))
+    rotation <= FOV_TOLERANCE_RAD ||
+        push!(differences, "in-plane rotations $(round(rad2deg(rotation); digits=3)) deg apart")
+    isempty(differences) && return
+    error("The water reference $water_file does not share the FOV of $met_file: " *
+          join(differences, ", ") * ". Its coil weights and water signal can only be moved " *
+          "between matrices of the same FOV.")
+end
+
+"""`data` on the water reference's grid, brought onto the metabolite scan's by
+zero-filling or cutting k-space, as MRSI_Reconstruction.m's op_CoilCombineData does
+with the weights it loads."""
+function onto_metabolite_grid(data, met_info, water_info, met_file, water_file)
+    grid = matrix_size(met_info)
+    size(data)[1:3] == grid && return data
+    check_same_fov(met_info, water_info, met_file, water_file)
+    println("Julia: resizing $(size(data)[1:3]) to the metabolite grid $grid in k-space")
+    return MRSI.resize_grid(data, grid)
+end
+
+"""Metabolite over water reconstruction gain. With both scans combined with the same
+coil weights neither is normalised by its own reference scan, so the images of one
+density differ by this ratio, and W1 has to scale the water signal by it."""
+reconstruction_gain_ratio(met_info, water_info; kw...) =
+    MRSI.reconstruction_gain(met_info[:ONLINE]; kw...) / MRSI.reconstruction_gain(water_info[:ONLINE]; kw...)
 
 """What deep_crt_mrsi.combined_csi reads out of a CombinedCSI.mat.
 
@@ -200,15 +260,10 @@ if get(p, "WaterReference_flag", 0) == 1 && !isfile(joinpath(out_path, "WaterRef
     println("Julia: water reference pass.")
 end
 
-if is_water_ref
-    # The water file is the last comma-separated field, as GetPar_CreateTempl_MaskPart1.m
-    # reads it: "W1,/path/to/file", or a bare path whose name carries the method. GetPar
-    # has already checked that it exists.
-    watref_setting = get(p, "WaterReference_MethodAndFile", "")
-    dat_file = String(strip(last(split(watref_setting, ','))))
-else
-    dat_file = csi_paths[clamp(cur_avg, 1, n_files)]
-end
+# GetPar has already checked that the water file exists.
+water_file = get(p, "WaterReference_flag", 0) == 1 ? water_reference_file(p) : nothing
+met_file = csi_paths[1]
+dat_file = is_water_ref ? water_file : csi_paths[clamp(cur_avg, 1, n_files)]
 isfile(dat_file) || error("CSI file not found: $dat_file")
 println("Julia: reconstructing $dat_file (average $cur_avg, water reference: $is_water_ref)")
 
@@ -267,6 +322,19 @@ println("Julia: hamming=$hamming_flag, noise_decorrelation=$noisedecor_flag, lip
 println("Julia: mode=$parity_mode, gradient_delay_us=$(something(gradient_delay_us, "protocol")), " *
         "mmap=$mmap_val, zero_fill=$zero_fill_flag")
 
+# Coil weights fit only the channels they were derived in, and coil compression and
+# noise decorrelation are derived per measurement. So both passes mix the channels as
+# the metabolite scan does, and the water pass stores that mixing with its weights.
+watref_path = joinpath(out_path, "WaterReference.mat")
+shared_mixing = if is_water_ref
+    Matrix{ComplexF64}(MRSI.channel_mixing_matrix(met_file; do_noise_decorrelation=noisedecor_flag))
+else
+    stored_channel_mixing(watref_path)
+end
+isnothing(shared_mixing) ||
+    println("Julia: channels mixed as in $met_file, $(size(shared_mixing, 2)) channels")
+mixing_kw = isnothing(shared_mixing) ? (;) : (; channel_mixing_matrix = shared_mixing)
+
 # What Part1's own flags ask for, in both modes.
 common_kw = (
     datatype = ComplexF32,
@@ -276,6 +344,7 @@ common_kw = (
     lipid_decon = lipid_decon,
     zero_fill = zero_fill_flag,
     lipid_decon_kw...,
+    mixing_kw...,
 )
 
 # The settings MATLAB picks differently. Each one was measured against a
@@ -299,21 +368,36 @@ delay_kw = isnothing(gradient_delay_us) ? (;) : (; gradient_delay_us)
 recon_kw = parity_mode == "matlab" ? (; common_kw..., matlab_kw...) :
                                      (; common_kw..., delay_kw...)
 
-# The water reference supplies the coil weights for the metabolite scan, the way
-# MRSI_Reconstruction.m reuses the ones it stored in WaterReference.mat. Without
-# this the two passes would be coil combined differently and could not be compared.
-watref_path = joinpath(out_path, "WaterReference.mat")
-coil_weights = is_water_ref ? nothing : stored_coil_weights(watref_path)
+# The water reference supplies the coil weights for both scans, the way
+# MRSI_Reconstruction.m reuses the ones it stored in WaterReference.mat. The water
+# pass stores the weights its own CSI is combined with, at MATLAB's FID point, so
+# the ratio of the two CSIs is the ratio of their signals, up to the reconstruction
+# gains. The ICE route takes them from its reconstruction, further down.
+coil_weights = nothing
+if is_water_ref && parity_mode == "matlab"
+    # Derived with the settings the CSI is reconstructed with, so they are the ones
+    # its combination would derive itself.
+    coil_weights = MRSI.coil_combine_weights(dat_file; ref_point_for_combine=MATLAB_REF_POINT,
+                                             combine_method=combine_method_of(dat_file), recon_kw...)
+elseif !is_water_ref
+    coil_weights = stored_coil_weights(watref_path)
+end
+if !is_water_ref && !isnothing(coil_weights)
+    met_info = MRSI.read_scan_info(dat_file)
+    if size(coil_weights)[1:3] != matrix_size(met_info)
+        isnothing(water_file) &&
+            error("The coil weights in $watref_path are on another grid, and without -w there is " *
+                  "no water reference to check its FOV against.")
+        coil_weights = onto_metabolite_grid(coil_weights, met_info, MRSI.read_scan_info(water_file),
+                                            dat_file, water_file)
+    end
+end
 isnothing(coil_weights) || println("Julia: combining with the water reference coil weights")
 
 ice_patref = nothing
 result = try
     if parity_mode == "matlab"
-        scan_info = MRSI.read_scan_info(dat_file)
-        # Berni combines a single channel with unit-magnitude weights (Phase VC),
-        # not MUSICAL, and the choice changes the result rather than only its scale.
-        combine_method = scan_info[:ONLINE][:n_channels] == 1 ? :phase_only : :musical
-        MRSI.reconstruct(dat_file; common_kw..., matlab_kw..., combine_method, coil_weights)
+        MRSI.reconstruct(dat_file; common_kw..., matlab_kw..., combine_method=combine_method_of(dat_file), coil_weights)
     else
         # reconstruct_like_ICE is the entry point ICE parity was established against:
         # it reads alICEProgramPara for the frequency offset, the drift and the
@@ -321,11 +405,18 @@ result = try
         # makes this mode ICE-equivalent; mirroring its choices here would be a
         # second copy to drift out of sync. prescan=false because Part1 has no use
         # for the reconstructed PATREFANDIMASCAN and it is not free.
-        reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., coil_weights)
+        water_kw = is_water_ref ? (; ref_point_for_combine=MATLAB_REF_POINT,
+                                     combine_method=combine_method_of(dat_file)) : (;)
+        reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., water_kw...,
+                                         coil_weights)
         # Keep the reference scan it already reconstructed: reconstruct_uncombined
         # would redo it through plain reconstruct, without the protocol gating, and
         # the field map would then come from a different reference than the data.
         global ice_patref = get(reco, :PATREFSCAN_UNCOMBINED, nothing)
+        if is_water_ref
+            isnothing(ice_patref) && error("The water reference $dat_file has no PATREFSCAN, so it cannot supply coil weights")
+            global coil_weights = MRSI.coil_combine_weights(first(ice_patref); water_kw...)
+        end
         reco[:ONLINE]
     end
 catch err
@@ -334,8 +425,8 @@ catch err
     # about either, so the context goes first and the error keeps its trace.
     if !isnothing(coil_weights) && err isa DimensionMismatch
         @error "The coil weights from $watref_path have size $(size(coil_weights)) " *
-               "(grid, 1, channels). A water reference acquired on another grid or with " *
-               "another coil compression cannot combine $dat_file."
+               "(grid, 1, channels). Weights derived with another coil compression " *
+               "cannot combine $dat_file."
     end
     rethrow()
 end
@@ -374,8 +465,19 @@ end
 println("Julia: writing $out_raw")
 write_complex_raw(out_raw, csi_data)
 
+# W1 reads the water signal voxel by voxel against the spectra, so it is stored on
+# their grid and in the metabolite reconstruction's gain.
 if is_water_ref
-    write_water_reference(watref_path, dat_file, csi_data, recon_kw)
+    println("Julia: storing the coil weights of FID point $MATLAB_REF_POINT")
+    met_info, water_info = MRSI.read_scan_info(met_file), MRSI.read_scan_info(dat_file)
+    # reconstruct_like_ICE sets ice and its own z window
+    gain_kw = parity_mode == "matlab" ? (; ice = false, matlab_kw.do_hamming_filter_z) :
+                                        (; ice = true, do_hamming_filter_z = :ice)
+    gain_ratio = reconstruction_gain_ratio(met_info, water_info; gain_kw...)
+    println("Julia: metabolite / water reconstruction gain $(round(gain_ratio; sigdigits=5)), " *
+            "applied to the water signal")
+    water_for_w1 = onto_metabolite_grid(csi_data, met_info, water_info, met_file, dat_file) .* Float32(gain_ratio)
+    write_water_reference(watref_path, coil_weights, water_for_w1, shared_mixing, water_info, gain_ratio)
 end
 
 if !is_water_ref && (n_files <= 1 || cur_avg == n_files)
