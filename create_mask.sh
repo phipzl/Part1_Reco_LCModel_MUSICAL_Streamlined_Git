@@ -43,6 +43,13 @@ if [[ $T1w_flag -eq 1 ]]; then # if T1_map is inputted, create magnitude minc fi
 
     if [[ "$T1w_path" == */*.mnc ]]; then # Copy magnitude.mnc if T1w_path is minc-file.
         cp $T1w_path ./${tmp_dir}/magnitude.mnc
+    elif [[ "$T1w_path" == *.nii || "$T1w_path" == *.nii.gz ]]; then # A NIfTI only needs the conversion
+        if [[ "$T1w_path" == *.gz ]]; then
+            gunzip -c "$T1w_path" > ./${tmp_dir}/magnitude.nii
+        else
+            cp "$T1w_path" ./${tmp_dir}/magnitude.nii
+        fi
+        nii2mnc ./${tmp_dir}/magnitude.nii ./${tmp_dir}/magnitude.mnc
     else # Only perform the dcm2mnc stuff if T1w_path is NOT a minc-file
     
         #dcm2mnc $T1w_path -dname ./${tmp_dir} -fname magnitude .

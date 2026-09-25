@@ -1236,7 +1236,42 @@ csiBak.Data = csi; csi = csiBak; clear csiBak;
 
 if(Par.Flags.AlignFreq_flag)
 	fprintf('\n\nPERFORM FREQUENCY ALIGNMENT')  
-    if(exist('AlignFreq_B0Fieldmap','var'))
+    if(isfield(Par.Settings,'AlignFreq_method') && strcmpi(Par.Settings.AlignFreq_method,'Patref'))
+        % -A Patref: the field map from the phase evolution across the reference
+        % scan, the estimator the online FIRE route uses. Deliberately written to
+        % match deep_crt_mrsi.b0_correction.calculate_B0 term for term, so that
+        % this route and the Julia one can be compared on the map they produce.
+        if(~exist('image_FullFID','var') || ~isfield(image_FullFID,'Data'))
+            error('MRSI_Reconstruction:NoPatref', ...
+                  '-A Patref needs the reference scan, but none was reconstructed.')
+        end
+        AlignFreq_Ref = image_FullFID.Data;                                   % (x,y,z,t,cha)
+        AlignFreq_DeltaPhi = angle(sum( AlignFreq_Ref(:,:,:,2:end,:) .* ...
+                                        conj(AlignFreq_Ref(:,:,:,1:end-1,:)), 5));
+        AlignFreq_B0_Hz = mean(AlignFreq_DeltaPhi,4) / (2*pi) / (Par.CSI.Dwelltimes(1)/10^9);
+        % Outside the mask the map is zeroed rather than the voxels skipped: the
+        % modulation is then exp(0), which is what B0_correct_fids does with its
+        % brainmask, so both routes leave the same voxels untouched.
+        if(exist('mask','var') && ~isempty(mask) && isequal(size(mask),size(AlignFreq_B0_Hz)))
+            AlignFreq_B0_Hz(~logical(mask)) = 0;
+        end
+        nS  = Par.CSI.vecSize;
+        dwt = Par.CSI.Dwelltimes(1);
+        t   = (0:nS-1)*dwt/10^9;
+        % odMRSIrecon modulates with exp(+2i*pi*map*t), B0_correct_fids with
+        % exp(-2i*pi*B0*t), so the map is negated to make the two identical.
+        csi.Data = odMRSIrecon(csi.Data,-AlignFreq_B0_Hz,t);
+        if(~exist(sprintf('%s/AlignFreq', Par.Paths.out_path),'dir'))
+            mkdir(sprintf('%s/AlignFreq', Par.Paths.out_path))
+        end
+        AlignFreq_fid = fopen(sprintf('%s/AlignFreq/B0map_Hz.raw', Par.Paths.out_path),'w');
+        fwrite(AlignFreq_fid,single(AlignFreq_B0_Hz),'float32');
+        fclose(AlignFreq_fid);
+        save(sprintf('%s/AlignFreq/AlignFreq_ShiftMap.mat', Par.Paths.out_path), 'AlignFreq_B0_Hz')
+        clear nS dwt AlignFreq_Ref AlignFreq_DeltaPhi AlignFreq_fid
+
+
+    elseif(exist('AlignFreq_B0Fieldmap','var'))
         % Convert from ppm to Hz
         AlignFreq_B0Fieldmap_Hz = -AlignFreq_B0Fieldmap*Par.CSI.LarmorFreq/10^6;
         % time vector
