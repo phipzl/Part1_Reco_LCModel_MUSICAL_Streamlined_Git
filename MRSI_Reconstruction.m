@@ -63,6 +63,8 @@ end
 IsWatRef = false;
 if(Par.Flags.WaterReference_flag && (~exist([Par.Paths.out_path '/WaterReference.mat' ],'file')))
     IsWatRef = true;
+    % The water pass reads the water file. W2 has it from Parameters_water.mat already, W1 has no such file.
+    Par.Paths.csi_path{CurAvg} = Par.Paths.WaterReference_path;
 end
 
 %% Read Noise Data
