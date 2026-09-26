@@ -356,17 +356,26 @@ matlab_kw = (
     frequency_drift_correction = nothing,
     ref_point_for_combine = MATLAB_REF_POINT,
     gradient_delay_us = something(gradient_delay_us, [0.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]),
+    # op_ReconstructNonCartMRData.m's rotation of the FOV offset into the slice
+    fov_shift_rotation = :matlab_legacy,
 )
 
 # -G, when it was given, applies in both modes. Left out otherwise so the ICE
 # mode's protocol gating decides.
 delay_kw = isnothing(gradient_delay_us) ? (;) : (; gradient_delay_us)
 
+# The ICE mode shifts the FOV in the scanner's slice basis.
+ice_kw = (; fov_shift_rotation = :siemens, delay_kw...)
+
+# An MRSI.jl without the rotation modes ignores the keyword and shifts with its own.
+isdefined(MRSI, :matlab_fov_shift_rotation) ||
+    error("This MRSI.jl has no fov_shift_rotation=:matlab_legacy; JULIA_MRSI_PKG needs a newer one.")
+
 # What the helpers reconstruct the reference scan and the coil weights with. It
 # has to be the settings the CSI was reconstructed with, or the field map and the
 # weights come from a differently reconstructed reference than the data.
 recon_kw = parity_mode == "matlab" ? (; common_kw..., matlab_kw...) :
-                                     (; common_kw..., delay_kw...)
+                                     (; common_kw..., ice_kw...)
 
 # The water reference supplies the coil weights for both scans, the way
 # MRSI_Reconstruction.m reuses the ones it stored in WaterReference.mat. The water
@@ -407,7 +416,7 @@ result = try
         # for the reconstructed PATREFANDIMASCAN and it is not free.
         water_kw = is_water_ref ? (; ref_point_for_combine=MATLAB_REF_POINT,
                                      combine_method=combine_method_of(dat_file)) : (;)
-        reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., delay_kw..., water_kw...,
+        reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., ice_kw..., water_kw...,
                                          coil_weights)
         # Keep the reference scan it already reconstructed: reconstruct_uncombined
         # would redo it through plain reconstruct, without the protocol gating, and
