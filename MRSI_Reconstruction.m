@@ -1672,7 +1672,9 @@ end
         elseif(strcmp(Par.Settings.WaterReference_method, 'W1'))
             display([ char(10) 'Load water reference' char(10)])
             load([Par.Paths.out_path '/WaterReference.mat' ],'WaterReferenceCSI')
-            Data.watref = WaterReferenceCSI;
+            Data.watref = water_reference_on_csi_grid(WaterReferenceCSI, csi);
+            WaterReferenceOnCSIGrid = Data.watref;     % for LCModel files written again after -A Patref or WALRUS
+            save([Par.Paths.out_path '/WaterReference.mat' ],'WaterReferenceOnCSIGrid','-append')
         end
 
     end
