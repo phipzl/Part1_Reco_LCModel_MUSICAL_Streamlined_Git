@@ -230,6 +230,7 @@ def main(tmp_dir):
         record["fitters"]["LCModel"] = dict(C_fit=c_fit, **inputs)
         fitted = lcmodel_amplitudes(os.path.join(out_path, "spectra"), shape)
         write_scaled("LCModel", fitted, c_fit, scale, maps_dir, template)
+    bases = par.get("basis_path") or []
     for label, fitter in DEEP_FITTERS.items():
         folder = os.path.join(maps_dir, f"Orig_{label}")
         fitted = deep_amplitudes(folder)
@@ -238,12 +239,18 @@ def main(tmp_dir):
         info = {"larmor_frequency": larmor, "dwelltime": dwell * 1e9}
         try:
             c_fit, inputs = calibration.calibrate_deep(
-                fitter, info, water_amplitude, median_water, points
+                fitter,
+                info,
+                water_amplitude,
+                median_water,
+                points,
+                sources=[bases] if isinstance(bases, str) else bases,
             )
         except (ValueError, RuntimeError) as reason:
             print(f"water_scaling: no calibration for {label}, its maps stay unscaled: {reason}")
             continue
         record["fitters"][label] = dict(C_fit=c_fit, **inputs)
+        print(f"water_scaling: {label} a_p {inputs['a_p']:.6g} ({inputs['a_p_method']})")
         write_scaled(label, fitted, c_fit, scale, maps_dir, template)
 
     with open(os.path.join(water_dir, "water_scaling.json"), "w") as f:

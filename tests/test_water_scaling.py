@@ -170,6 +170,71 @@ class Inputs(unittest.TestCase):
         self.assertNotIn("tCr", calibration.lcmodel_groups(table, present))
 
 
+A_P = 0.004
+LINES = {
+    "Cr": [(3.027, 3), (3.913, 2)],
+    "PCr": [(3.029, 3), (3.930, 2)],
+    "NAA": [(2.008, 3), (2.49, 1), (2.67, 1)],
+}
+
+
+def write_basis(path, lines, hz=297.22, dt=1e-4, n=16384):
+    """An LCModel .BASIS of lines {name: [(ppm, protons)]} with 8/s decay, 1 mM, a_p A_P."""
+    t = np.arange(n) * dt
+    with open(path, "w") as f:
+        f.write(
+            f" $SEQPAR\n HZPPPM = {hz}\n $END\n $BASIS1\n BADELT = {dt}\n NDATAB = {n}\n $END\n"
+        )
+        for name, peaks in lines.items():
+            fid = sum(h * np.exp(2j * np.pi * (4.65 - ppm) * hz * t) for ppm, h in peaks)
+            spectrum = np.fft.fft(A_P * fid * np.exp(-8.0 * t))
+            f.write(
+                f" $NMUSED\n $END\n $BASIS\n METABO = '{name}'\n CONC = 1.0\n ISHIFT = 0\n $END\n"
+            )
+            f.write("".join(f" {v.real:.12e} {v.imag:.12e}\n" for v in spectrum))
+
+
+class SourceBasis(unittest.TestCase):
+    """a_p of a deep basis made from an LCModel basis: the conversion's scale x the source's."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.source = os.path.join(self.dir, "source.basis")
+        write_basis(self.source, LINES)
+        header, entries = calibration.read_lcmodel_basis(self.source)
+        t_source = np.arange(int(header[2]) // 2) * header[1]
+        t = np.arange(840) * 3.6e-4
+        self.names = list(LINES)
+        columns = []
+        for name in self.names:
+            fid = np.fft.ifft(entries[name][2])[: t_source.size]
+            lin = np.interp(t, t_source, fid.real) + 1j * np.interp(t, t_source, fid.imag)
+            columns.append(25.0 * np.conj(lin) * np.exp(-22.0 * t))
+        self.fids = np.stack(columns, axis=1)
+        self.source_a_p = calibration.lcmodel_a_p(header, entries)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def deep_a_p(self, sources):
+        return calibration.deep_a_p(self.fids, self.names, 3.6e-4, 297.22, sources)
+
+    def test_source(self):
+        self.assertAlmostEqual(self.source_a_p / A_P, 1.0, delta=1e-3)
+        a_p, record = self.deep_a_p([self.source])
+        self.assertEqual(record["a_p_method"], "source basis")
+        self.assertAlmostEqual(a_p / (25.0 * self.source_a_p), 1.0, delta=1e-6)
+
+    def test_no_or_other_source(self):
+        other = os.path.join(self.dir, "other.basis")
+        write_basis(other, dict(LINES, NAA=[(2.008, 3), (2.52, 1), (2.67, 1)]))
+        for sources in ([], [other]):
+            with self.subTest(sources=sources):
+                a_p, record = self.deep_a_p(sources)
+                self.assertEqual(record["a_p_method"], "singlet fit")
+                self.assertAlmostEqual(a_p / (25.0 * A_P), 1.0, delta=0.05)
+
+
 class RoundTrip(unittest.TestCase):
     """C_fit from one synthetic spectrum recovers the concentrations of another, with another
     mix, amplitude and noise."""
@@ -213,19 +278,29 @@ class RoundTrip(unittest.TestCase):
                 )
             self.check(*result[:3], c_fit, 0.02)
 
-    def deep(self, fitter, info, points, tolerance):
-        c_fit, _ = calibration.calibrate_deep(
-            fitter, info, water_scaling.water_amplitude, 30.0, points
+    def deep(self, fitter, info, points, tolerance, sources=()):
+        c_fit, inputs = calibration.calibrate_deep(
+            fitter, info, water_scaling.water_amplitude, 30.0, points, sources
         )
         with mock.patch.dict(calibration.TRUTH, self.MIX):
             result = calibration.fit_deep_synthetic(
-                fitter, info, water_scaling.water_amplitude, 300.0, points, seed=1
+                fitter,
+                info,
+                water_scaling.water_amplitude,
+                300.0,
+                points,
+                seed=1,
+                sources=sources,
             )
         self.check(*result[:3], c_fit, tolerance)
+        return inputs
 
     @unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
     def test_spatialregu_3t(self):
-        self.deep("gpufit", {"larmor_frequency": 123.246948e6, "dwelltime": 1.06e6}, 288, 0.02)
+        info = {"larmor_frequency": 123.246948e6, "dwelltime": 1.06e6}
+        inputs = self.deep("gpufit", info, 288, 0.02, sources=[LCMODEL_BASIS])
+        if os.path.isfile(LCMODEL_BASIS):
+            self.assertEqual(inputs["a_p_method"], "source basis")
 
     @unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
     def test_phive_7t(self):

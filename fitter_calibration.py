@@ -3,10 +3,12 @@
 
 The synthetic metabolite FID is sum_i c_i * basis_i, built from the fitter's own basis on
 the grid of the data; its water is 2 * 55556 * a_p, a_p the basis' per-proton amplitude
-(the Cr CH3 singlet at the first stored point). With F the fitter's result and A_w the
+(the Cr CH3 singlet at the first stored point; for a deep basis made from an LCModel basis,
+that basis' a_p times the conversion's scale). With F the fitter's result and A_w the
 water amplitude from the estimator used in vivo, C_fit = c * A_w / F.
 """
 
+import glob
 import hashlib
 import json
 import os
@@ -51,6 +53,9 @@ DEEP_NAMES = {"tNAA": "tNAA", "tCr": "tCr", "tCho": "tCho", "Glu": "Glu", "mIns"
 METABOLITE_LW_PPM, WATER_LW_PPM, WATER_GAUSS_PPM = 0.024, 0.04, 0.03
 NOISE = 2e-4
 DEEP_GRID = (8, 8, 3)
+# A deep basis derives from an LCModel basis if |deep| / |source| is one scale times an
+# envelope for all metabolites, to these tolerances, over its first TRANSFER_SECONDS.
+TRANSFER_SECONDS, TRANSFER_TOLERANCE = 0.15, 1e-3
 
 
 def line_amplitude(fid, dt, f_expected, tmax=0.6, max_points=4000):
@@ -164,13 +169,25 @@ def read_lcmodel_basis(path):
     return header, entries
 
 
+def lcmodel_a_p(header, entries):
+    """a_p of a read_lcmodel_basis result: its Cr CH3 singlet per proton and mM."""
+    hz_basis, dt_basis, n_basis = header
+    conc, ishift, spectrum = entries["Cr"]
+    df = 1.0 / (int(n_basis) * dt_basis)
+    a_p = line_amplitude(
+        np.fft.ifft(spectrum), dt_basis, (4.65 - CR_CH3_PPM) * hz_basis + ishift * df
+    )
+    return a_p / CR_CH3_PROTONS / conc
+
+
 def lcmodel_synthetic(basis_path, omitted, hzpppm, deltat, nunfil, linewidth_ppm):
     """Metabolite FID on the data grid (LCModel .RAW convention), its concentrations and a_p.
 
     Each basis FID gets its ISHIFT, is stretched to the data's HZPPPM (ppm preserved) and
     interpolated onto the data dwell.
     """
-    (hz_basis, dt_basis, n_basis), basis = read_lcmodel_basis(basis_path)
+    header, basis = read_lcmodel_basis(basis_path)
+    hz_basis, dt_basis, n_basis = header
     n_basis = int(n_basis)
     df = 1.0 / (n_basis * dt_basis)
     tb = np.arange(n_basis // 2) * dt_basis
@@ -183,17 +200,13 @@ def lcmodel_synthetic(basis_path, omitted, hzpppm, deltat, nunfil, linewidth_ppm
             tb[:last], fid[:last].imag
         )(tau)
 
-    conc, ishift, spectrum = basis["Cr"]
-    a_p = line_amplitude(
-        np.fft.ifft(spectrum), dt_basis, (4.65 - CR_CH3_PPM) * hz_basis + ishift * df
-    )
     present = truth(set(basis) - set(omitted))
     met = sum(
         c / basis[name][0] * on_data_grid(basis[name][2], basis[name][1])
         for name, c in present.items()
     )
     t = np.arange(nunfil) * deltat
-    return met * np.exp(-np.pi * linewidth_ppm * hzpppm * t), present, a_p / CR_CH3_PROTONS / conc
+    return met * np.exp(-np.pi * linewidth_ppm * hzpppm * t), present, lcmodel_a_p(header, basis)
 
 
 def read_lcmodel_table(path):
@@ -297,7 +310,8 @@ def calibrate_lcmodel(control_path, lcmodel, workdir, water_fit, water_amplitude
 
 
 def deep_basis(fitter, info):
-    """The basis FIDs as the fitter fits them, their names, the dwell time, a_p and the file."""
+    """The basis FIDs as the fitter fits them, their names, the dwell time, the basis'
+    reference frequency (MHz) and the file."""
     from mrs_utils.basisset import Basisset
 
     if fitter == "gpufit":
@@ -324,17 +338,76 @@ def deep_basis(fitter, info):
         reference_frequency=larmor_mhz,
         nucleus=nucleus,
     )
-    fids = np.asarray(basis.fids)
-    names = list(basis.metabolite_names)
-    a_p = (
+    return np.asarray(basis.fids), list(basis.metabolite_names), float(dwell), larmor_mhz, path
+
+
+def source_candidates(extra=()):
+    """LCModel bases a deep basis may be made from: the given ones and those shipped with forD."""
+    try:
+        from forD import DLFIT
+
+        shipped = sorted(glob.glob(os.path.join(os.path.dirname(str(DLFIT.basis_path)), "*.basis")))
+    except ImportError:
+        shipped = []
+    paths = [os.path.normpath(p) for p in (*extra, *shipped) if os.path.isfile(p)]
+    return list(dict.fromkeys(paths))
+
+
+def transfer_scale(fids, names, dwell, header, entries):
+    """s with |deep| = s exp(-a t - b t^2) |source per mM, linearly interpolated|, the same for
+    every shared metabolite; None if the deep basis is not such a copy of the source."""
+    hz_basis, dt_basis, n_basis = header
+    t = np.arange(fids.shape[0]) * dwell
+    t = t[t < TRANSFER_SECONDS]
+    t_source = np.arange(int(n_basis) // 2) * dt_basis
+    scales, residuals = [], []
+    for name in sorted(set(names) & set(entries)):
+        conc, _, spectrum = entries[name]
+        source = np.fft.ifft(spectrum)[: t_source.size] / conc
+        lin = np.interp(t, t_source, source.real) + 1j * np.interp(t, t_source, source.imag)
+        keep = np.abs(lin) > 0.1 * np.abs(lin).max()
+        log_ratio = np.log(np.abs(fids[: t.size, names.index(name)][keep]) / np.abs(lin[keep]))
+        design = np.stack([np.ones(keep.sum()), -t[keep], -t[keep] ** 2], axis=1)
+        coef = np.linalg.lstsq(design, log_ratio, rcond=None)[0]
+        scales.append(np.exp(coef[0]))
+        residuals.append(np.std(log_ratio - design @ coef))
+    if "Cr" not in entries or len(scales) < 3 or max(residuals) > TRANSFER_TOLERANCE:
+        return None
+    return float(np.median(scales)) if max(scales) / min(scales) - 1 < TRANSFER_TOLERANCE else None
+
+
+def deep_a_p(fids, names, dwell, larmor_mhz, sources=()):
+    """a_p of a deep basis and how it was found: its scale to the first source it derives from
+    times that source's a_p, else the Cr CH3 fit on the basis itself (biased on short records)."""
+    singlet = (
         line_amplitude(fids[:, names.index("Cr")], dwell, (CR_CH3_PPM - 4.7) * larmor_mhz)
         / CR_CH3_PROTONS
     )
-    return fids, names, float(dwell), a_p, os.path.normpath(path)
+    for path in sources:
+        header, entries = read_lcmodel_basis(path)
+        scale = transfer_scale(fids, names, dwell, header, entries)
+        if scale is not None:
+            source_a_p = lcmodel_a_p(header, entries)
+            return scale * source_a_p, {
+                "a_p_method": "source basis",
+                "a_p_source_basis": path,
+                "a_p_source_sha256": sha256(path),
+                "a_p_source": source_a_p,
+                "a_p_transfer_scale": scale,
+                "a_p_singlet_fit": singlet,
+            }
+    return singlet, {"a_p_method": "singlet fit", "a_p_sources_tried": list(sources)}
 
 
 def fit_deep_synthetic(
-    fitter, info, water_fit, water_amplitude, n_points, seed=0, linewidth_ppm=METABOLITE_LW_PPM
+    fitter,
+    info,
+    water_fit,
+    water_amplitude,
+    n_points,
+    seed=0,
+    linewidth_ppm=METABOLITE_LW_PPM,
+    sources=(),
 ):
     """The synthetic spectrum through PHIVE (dlfit) or SpatialRegu (gpufit) on a small grid of
     identical voxels: F per group, A_w, the concentrations and the inputs."""
@@ -344,7 +417,8 @@ def fit_deep_synthetic(
     if fitter == "dlfit":
         fire._check_field_matches_basis(info, True)
     fit = (fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter)(info, False)
-    fids, names, dt, a_p, basis_path = deep_basis(fitter, info)
+    fids, names, dt, larmor_mhz, basis_path = deep_basis(fitter, info)
+    a_p, a_p_record = deep_a_p(fids, names, dt, larmor_mhz, source_candidates(sources))
     present = truth(names)
     met = np.zeros(n_points, complex)
     for name, c in present.items():
@@ -372,7 +446,8 @@ def fit_deep_synthetic(
         present,
         {
             "a_p": a_p,
-            "basis": basis_path,
+            **a_p_record,
+            "basis": os.path.normpath(basis_path),
             "basis_sha256": sha256(basis_path),
             "larmor_hz": larmor,
             "dwell_s": dt,
@@ -382,10 +457,10 @@ def fit_deep_synthetic(
     )
 
 
-def calibrate_deep(fitter, info, water_fit, water_amplitude, n_points):
+def calibrate_deep(fitter, info, water_fit, water_amplitude, n_points, sources=()):
     """C_fit of PHIVE (dlfit) or SpatialRegu (gpufit) for the data's field and grid."""
     fitted, estimated, present, inputs = fit_deep_synthetic(
-        fitter, info, water_fit, water_amplitude, n_points
+        fitter, info, water_fit, water_amplitude, n_points, sources=sources
     )
     c_fit, per_group = constants(fitted, estimated, present)
     return c_fit, dict(
