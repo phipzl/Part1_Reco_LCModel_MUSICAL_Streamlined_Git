@@ -45,7 +45,9 @@ GROUPS = {
 # The deep fitters' names for the groups
 DEEP_NAMES = {"tNAA": "tNAA", "tCr": "tCr", "tCho": "tCho", "Glu": "Glu", "mIns": "Ins"}
 # Line widths in ppm (3 Hz metabolites, 5 Hz Lorentzian and 3.7 Hz Gaussian water at 3T),
-# noise relative to the metabolite FID's first point.
+# noise relative to the metabolite FID's first point. LCModel's result depends on the Lorentzian
+# broadening beyond its basis' own (its lineshape model misses Lorentzian tails, not Gaussian
+# ones); 3 Hz matches its in vivo fits on average.
 METABOLITE_LW_PPM, WATER_LW_PPM, WATER_GAUSS_PPM = 0.024, 0.04, 0.03
 NOISE = 2e-4
 DEEP_GRID = (8, 8, 3)
