@@ -1,7 +1,8 @@
 #!/bin/bash
 # The Julia reconstruction (-S), WALRUS through -L "WALRUS,<model>", the field
-# correction -A Patref and the deepmrsi fitters (-l PHIVE, SpatialRegu or Both).
-# Sourced by run_matlab.sh, which calls into it only when one of these is given.
+# correction -A Patref, the deepmrsi fitters (-l PHIVE, SpatialRegu or Both) and the
+# water scaling after the fit (-w W3). Sourced by run_matlab.sh, which calls into it
+# only when one of these is given.
 
 # Stop the whole pipeline when a step fails, so the exit code reports it.
 # Argument $1: name of the step that failed.
@@ -130,14 +131,45 @@ deepmrsi_fitting() {
     esac
 }
 
-# W1, W2 or empty, classified the way GetPar_CreateTempl_MaskPart1.m does: by the
-# first of the two names found anywhere in the -w argument, path included.
+# W1, W2, W3 or empty. W1 and W2 are classified the way GetPar_CreateTempl_MaskPart1.m
+# does: by the first of the two names found anywhere in the -w argument, path included.
+# W3 by its method field, as it reaches MATLAB as W1.
 water_reference_method() {
     [[ ${WaterReference_flag:-0} -eq 1 ]] || return 0
+    if [[ ${WaterReference_MethodAndFile%%,*} == "W3" ]]; then
+        echo W3
+        return 0
+    fi
     case "$WaterReference_MethodAndFile" in
         *W1*) echo W1 ;;
         *W2*) echo W2 ;;
     esac
+}
+
+# -w W3 is the W1 water pass with the fits left unscaled; water_scaling.py scales every
+# fitter's result to the water afterwards. Called once the options are parsed.
+prepare_water_scaling() {
+    export WaterScaling_flag=0
+    [[ $(water_reference_method) == "W3" ]] || return 0
+    export WaterScaling_flag=1
+    export WaterReference_MethodAndFile="W1,${WaterReference_MethodAndFile#*,}"
+}
+
+# Both reconstructions write the W1 water into the LCModel controls; W3 fits without it.
+unscale_lcm_controls() {
+    [[ -d "$out_path/spectra" ]] || return 0
+    find "$out_path/spectra" -maxdepth 1 -name '*.control' -print0 |
+        xargs -0 -r sed -i -e '/^ *DOWS *= *T/d' -e '/^ *FILH2O *=/d'
+}
+
+run_water_scaling() {
+    local Python ScriptDir
+    Python=$(command -v python3 || command -v python)
+    [[ -n $Python ]] || matlab_step_failed "the water scaling (no python3 or python found)"
+    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    write_initial_parameters_json
+    echo -e "\nRun this command: $Python $ScriptDir/water_scaling.py $abs_tmp_dir"
+    "$Python" "$ScriptDir/water_scaling.py" "$abs_tmp_dir" || matlab_step_failed water_scaling.py
 }
 
 patref_is_the_alignment() {
