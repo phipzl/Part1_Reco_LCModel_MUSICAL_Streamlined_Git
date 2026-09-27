@@ -235,22 +235,40 @@ class SourceBasis(unittest.TestCase):
                 self.assertAlmostEqual(a_p / (25.0 * A_P), 1.0, delta=0.05)
 
 
+class FrequencyOffset(unittest.TestCase):
+    def test_shifted_singlets(self):
+        mhz, dt, n = 297.22, 3.6e-4, 840
+        t = np.arange(n) * dt
+        fids = np.stack([np.exp(2j * np.pi * (ppm - 4.7) * mhz * t) for ppm in (2.008, 3.027)], 1)
+        # PHIVE's window as run_deepmrsi.py writes it: highest ppm first
+        ppm = (4.7 + (196 + np.arange(252) - 512) / (dt * 1024 * mhz))[::-1]
+        rng = np.random.default_rng(0)
+        shape = np.exp(-np.pi * 8.0 * t - (np.pi * 2.0 * t) ** 2 / (4 * np.log(2)))
+        voxels = [a * (fids @ [1.5, 1.0]) * shape * np.exp(2j * np.pi * 9.5 * t) for a in range(60)]
+        spectra = np.exp(-2j * np.pi * np.outer((ppm - 4.7) * mhz, t)) @ np.stack(voxels, 1)
+        spectra = spectra.T + 2.0 * (
+            rng.standard_normal((60, 252)) + 1j * rng.standard_normal((60, 252))
+        )
+        spectra[:5] = 0
+        record = calibration.frequency_offset(spectra, ppm, fids, ["NAA", "Cr"], dt, mhz * 1e6, n)
+        self.assertAlmostEqual(record["hz"], 9.5, delta=0.2)
+        self.assertEqual(record["voxels"], 27)
+
+
 class RoundTrip(unittest.TestCase):
     """C_fit from one synthetic spectrum recovers the concentrations of another, with another
     mix, amplitude and noise."""
 
-    MIX = {
-        name: c * f
-        for (name, c), f in zip(
-            calibration.TRUTH.items(),
-            (1.2, 0.8, 1.1, 0.9, 1.3, 0.7, 1.0, 1.25, 0.75, 1.1, 0.9, 1.0, 1.0),
-        )
-    }
+    FACTORS = dict(
+        zip(calibration.TRUTH, (1.2, 0.8, 1.1, 0.9, 1.3, 0.7, 1.0, 1.25, 0.75, 1.1, 0.9, 1.0, 1.0))
+    )
+    MIX = {name: c * f for (name, c), f in zip(calibration.TRUTH.items(), FACTORS.values())}
 
     def check(self, fitted, estimated, present, c_fit, tolerance):
+        """c_fit one constant, or one per group."""
         known = calibration.group_truth(present)
         for group, value in fitted.items():
-            recovered = c_fit * value / estimated
+            recovered = (c_fit[group] if isinstance(c_fit, dict) else c_fit) * value / estimated
             with self.subTest(group=group):
                 self.assertAlmostEqual(recovered / known[group], 1.0, delta=tolerance)
 
@@ -278,21 +296,26 @@ class RoundTrip(unittest.TestCase):
                 )
             self.check(*result[:3], c_fit, 0.02)
 
-    def deep(self, fitter, info, points, tolerance, sources=()):
-        c_fit, inputs = calibration.calibrate_deep(
-            fitter, info, water_scaling.water_amplitude, 30.0, points, sources
+    def deep(self, fitter, info, points, tolerance, offset_hz=0.0, sources=()):
+        """The test spectrum at offset_hz; the calibration measures the offset in the spectra
+        the fitter fitted."""
+        point = calibration.operating_point(fitter, offset_hz)
+        point["mix"] = {name: c * self.FACTORS.get(name, 1.0) for name, c in point["mix"].items()}
+        fitted, estimated, present, _, invivo = calibration.fit_deep_synthetic(
+            fitter,
+            info,
+            water_scaling.water_amplitude,
+            300.0,
+            points,
+            point,
+            seed=1,
+            sources=sources,
         )
-        with mock.patch.dict(calibration.TRUTH, self.MIX):
-            result = calibration.fit_deep_synthetic(
-                fitter,
-                info,
-                water_scaling.water_amplitude,
-                300.0,
-                points,
-                seed=1,
-                sources=sources,
-            )
-        self.check(*result[:3], c_fit, tolerance)
+        c_fit, inputs = calibration.calibrate_deep(
+            fitter, info, water_scaling.water_amplitude, 30.0, points, invivo, sources
+        )
+        constants = inputs["C_per_metabolite"] if inputs["per_group"] else c_fit
+        self.check(fitted, estimated, present, constants, tolerance)
         return inputs
 
     @unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
@@ -304,8 +327,12 @@ class RoundTrip(unittest.TestCase):
 
     @unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
     def test_phive_7t(self):
-        # The network's bias depends on the mix by a few percent per metabolite.
-        self.deep("dlfit", {"larmor_frequency": 297.22e6, "dwelltime": 3.6e5}, 840, 0.05)
+        # In vivo spectra sit about 10 Hz above PHIVE's basis; constants built at 0 Hz read
+        # these groups 1-7% high. The encoder's mix dependence leaves up to 3%.
+        info = {"larmor_frequency": 297.22e6, "dwelltime": 3.6e5}
+        inputs = self.deep("dlfit", info, 840, 0.03, offset_hz=10.0)
+        self.assertAlmostEqual(inputs["frequency_offset"]["hz"], 10.0, delta=1.0)
+        self.assertEqual(inputs["a_p_method"], "source basis")
 
 
 if __name__ == "__main__":

@@ -4,13 +4,15 @@
     python water_scaling.py <tmp_dir>
 
 Per voxel c = C_fit * F / A_w: F the fitter's result, A_w the water amplitude at the
-water FID's first sample and C_fit the fitter's constant (fitter_calibration.py). The
-unit is the institutional unit of pure water, 55556 mM with two protons; relaxation,
-saturation and the tissue water content are not corrected.
+water FID's first sample and C_fit the fitter's constant (fitter_calibration.py; PHIVE
+has one per metabolite group). The unit is the institutional unit of pure water,
+55556 mM with two protons; relaxation, saturation and the tissue water content are not
+corrected.
 
 Reads  <out_path>/WaterReference.mat   the W1 water pass, on the metabolite grid
        <out_path>/spectra/*.table      LCModel, fitted without water scaling
        <out_path>/maps/Orig_<Fitter>/  the deep fitters' <met>_amp_map.nii.gz
+       <out_path>/maps/SpecMap_PHIVEInput_{real,imag}.nii.gz   the spectra PHIVE fitted
 Writes <out_path>/maps/Orig_<Fitter>/<met>_iu_map.nii.gz
        <out_path>/maps/WaterReference/Water_{amp,fwhm_Hz,shift_Hz,residual}_map.nii.gz
        <out_path>/maps/WaterReference/water_scaling.json   C_fit with its inputs
@@ -152,6 +154,20 @@ def deep_amplitudes(folder):
     return maps
 
 
+def fitter_input(maps_dir, label, mask):
+    """The spectra a deep fitter fitted, in the mask, and their ppm axis (run_deepmrsi.py)."""
+    paths = [
+        os.path.join(maps_dir, f"SpecMap_{label}Input_{part}.nii.gz") for part in ("real", "imag")
+    ]
+    if not all(os.path.isfile(path) for path in paths):
+        raise RuntimeError(f"{paths[0]} or its imaginary part is missing")
+    real, imag = (nib.load(path) for path in paths)
+    spectra = np.asarray(real.dataobj, np.float32) + 1j * np.asarray(imag.dataobj, np.float32)
+    header = real.header
+    ppm = float(header["toffset"]) + np.arange(spectra.shape[-1]) * float(header["pixdim"][4])
+    return spectra[mask], ppm
+
+
 def main(tmp_dir):
     out_path = csi_io.read_out_path(tmp_dir)
     combined = csi_io.combined_path(tmp_dir)
@@ -229,7 +245,7 @@ def main(tmp_dir):
         )
         record["fitters"]["LCModel"] = dict(C_fit=c_fit, **inputs)
         fitted = lcmodel_amplitudes(os.path.join(out_path, "spectra"), shape)
-        write_scaled("LCModel", fitted, c_fit, scale, maps_dir, template)
+        write_scaled("LCModel", fitted, c_fit, {}, scale, maps_dir, template)
     bases = par.get("basis_path") or []
     for label, fitter in DEEP_FITTERS.items():
         folder = os.path.join(maps_dir, f"Orig_{label}")
@@ -238,31 +254,43 @@ def main(tmp_dir):
             continue
         info = {"larmor_frequency": larmor, "dwelltime": dwell * 1e9}
         try:
+            invivo = fitter_input(maps_dir, label, mask) if fitter == "dlfit" else None
             c_fit, inputs = calibration.calibrate_deep(
                 fitter,
                 info,
                 water_amplitude,
                 median_water,
                 points,
+                invivo=invivo,
                 sources=[bases] if isinstance(bases, str) else bases,
             )
         except (ValueError, RuntimeError) as reason:
             print(f"water_scaling: no calibration for {label}, its maps stay unscaled: {reason}")
             continue
         record["fitters"][label] = dict(C_fit=c_fit, **inputs)
+        per_group = inputs["C_per_metabolite"] if inputs["per_group"] else {}
         print(f"water_scaling: {label} a_p {inputs['a_p']:.6g} ({inputs['a_p_method']})")
-        write_scaled(label, fitted, c_fit, scale, maps_dir, template)
+        if "frequency_offset" in inputs:
+            offset = inputs["frequency_offset"]
+            print(
+                f"water_scaling: {label} synthetic at {offset['hz']:+.2f} Hz, the offset of its "
+                f"input (NAA {offset['NAA_hz']:+.2f}, Cr {offset['Cr_hz']:+.2f} Hz)"
+            )
+        write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template)
 
     with open(os.path.join(water_dir, "water_scaling.json"), "w") as f:
         json.dump(record, f, indent=1)
     print(f"water_scaling: done, {os.path.join(water_dir, 'water_scaling.json')}")
 
 
-def write_scaled(label, fitted, c_fit, scale, maps_dir, template):
+def write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template):
+    """The <met>_iu_maps, with a group's own constant where per_group has one."""
     folder = os.path.join(maps_dir, f"Orig_{label}")
     for name, amplitude in fitted.items():
-        write_map(folder, f"{name}_iu_map", c_fit * amplitude * scale, template)
-    print(f"water_scaling: {label} C_fit {c_fit:.5g}, {len(fitted)} maps in {folder}")
+        c = per_group.get(calibration.group_of(name), c_fit)
+        write_map(folder, f"{name}_iu_map", c * amplitude * scale, template)
+    groups = "".join(f", {group} {c:.5g}" for group, c in per_group.items())
+    print(f"water_scaling: {label} C_fit {c_fit:.5g}{groups}, {len(fitted)} maps in {folder}")
 
 
 if __name__ == "__main__":

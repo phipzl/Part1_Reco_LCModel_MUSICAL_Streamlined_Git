@@ -5,7 +5,8 @@ The synthetic metabolite FID is sum_i c_i * basis_i, built from the fitter's own
 the grid of the data; its water is 2 * 55556 * a_p, a_p the basis' per-proton amplitude
 (the Cr CH3 singlet at the first stored point; for a deep basis made from an LCModel basis,
 that basis' a_p times the conversion's scale). With F the fitter's result and A_w the
-water amplitude from the estimator used in vivo, C_fit = c * A_w / F.
+water amplitude from the estimator used in vivo, C_fit = c * A_w / F. PHIVE's synthetic
+sits at its in vivo operating point: mix, line shape and the dataset's frequency offset.
 """
 
 import glob
@@ -53,6 +54,30 @@ DEEP_NAMES = {"tNAA": "tNAA", "tCr": "tCr", "tCho": "tCho", "Glu": "Glu", "mIns"
 METABOLITE_LW_PPM, WATER_LW_PPM, WATER_GAUSS_PPM = 0.024, 0.04, 0.03
 NOISE = 2e-4
 DEEP_GRID = (8, 8, 3)
+# PHIVE's gain depends on where its input sits in its training distribution, so its synthetic
+# carries its median in vivo mix at 7T (basis units per mM, tCr 8) and line shape (Lorentzian,
+# Gaussian FWHM in ppm), shifted by the offset of the dataset's NAA and Cr singlets.
+PHIVE_MIX = {
+    "NAA": 11.55,
+    "NAAG": 2.125,
+    "Cr": 3.921,
+    "PCr": 4.079,
+    "GPC": 1.023,
+    "PCh": 0.937,
+    "Ins": 7.26,
+    "Glu": 8.113,
+    "Gln": 1.923,
+    "GSH": 2.098,
+    "GABA": 2.852,
+    "Tau": 2.144,
+    "Asp": 0.964,
+    "Scyllo": 1.851,
+    "Glc": 0.068,
+    "MM_mea": 0.01,
+    "Lip_c": 1.946,
+}
+PHIVE_LINE_PPM = (0.027, 0.0067)
+OFFSET_PEAKS = {"NAA": 2.008, "Cr": 3.027}
 # A deep basis derives from an LCModel basis if |deep| / |source| is one scale times an
 # envelope for all metabolites, to these tolerances, over its first TRANSFER_SECONDS.
 TRANSFER_SECONDS, TRANSFER_TOLERANCE = 0.15, 1e-3
@@ -104,13 +129,18 @@ def add_noise(fid, seed):
     return fid + sd * (rng.standard_normal(fid.shape) + 1j * rng.standard_normal(fid.shape))
 
 
-def truth(names):
-    """The TRUTH entries a fitter's synthetic carries."""
-    return {name: c for name, c in TRUTH.items() if name in names}
+def truth(names, mix=None):
+    """The entries of a mix (TRUTH by default) a fitter's synthetic carries."""
+    return {name: c for name, c in (TRUTH if mix is None else mix).items() if name in names}
 
 
 def group_truth(present):
     return {group: sum(present.get(m, 0.0) for m in members) for group, members in GROUPS.items()}
+
+
+def group_of(name):
+    """The GROUPS entry a map belongs to, by its own or a member's name, else None."""
+    return next((g for g, members in GROUPS.items() if name == g or name in members), None)
 
 
 def constants(fitted, water_amplitude, present):
@@ -131,10 +161,23 @@ def sha256(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def synthetic_record(present, water_amplitude):
+def operating_point(fitter, offset_hz=0.0):
+    """Mix, Lorentzian and Gaussian FWHM (ppm) and frequency offset (Hz) of a fitter's synthetic."""
+    if fitter == "dlfit":
+        lorentzian, gaussian = PHIVE_LINE_PPM
+        return dict(
+            mix=PHIVE_MIX, lorentzian_ppm=lorentzian, gaussian_ppm=gaussian, offset_hz=offset_hz
+        )
+    return dict(mix=TRUTH, lorentzian_ppm=METABOLITE_LW_PPM, gaussian_ppm=0.0, offset_hz=0.0)
+
+
+def synthetic_record(present, water_amplitude, point=None):
+    point = point or operating_point("lcmodel")
     return {
         "concentrations_mM": present,
-        "metabolite_linewidth_ppm": METABOLITE_LW_PPM,
+        "metabolite_linewidth_ppm": point["lorentzian_ppm"],
+        "metabolite_gaussian_ppm": point["gaussian_ppm"],
+        "frequency_offset_hz": point["offset_hz"],
         "water_lorentzian_ppm": WATER_LW_PPM,
         "water_gaussian_ppm": WATER_GAUSS_PPM,
         "noise_relative": NOISE,
@@ -399,18 +442,65 @@ def deep_a_p(fids, names, dwell, larmor_mhz, sources=()):
     return singlet, {"a_p_method": "singlet fit", "a_p_sources_tried": list(sources)}
 
 
+def peak_hz(magnitude, hz, k0, half=6):
+    """Frequency of each row's maximum within half points of k0, parabolically interpolated."""
+    first, stop = max(k0 - half, 1), k0 + half + 1
+    k = first + np.argmax(magnitude[:, first:stop], axis=1)
+    k = np.clip(k, 1, magnitude.shape[1] - 2)
+    y0, y1, y2 = (magnitude[np.arange(k.size), k + d] for d in (-1, 0, 1))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.interp(k + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2), np.arange(hz.size), hz)
+
+
+def frequency_offset(spectra, ppm, fids, names, dwell, larmor_hz, n_points):
+    """Record of the median offset "hz" of the NAA and Cr singlets of the spectra (voxels x
+    points on the ppm axis, model convention) from the same peaks of PHIVE's synthetic at 0 Hz,
+    over the better half by S/N."""
+    ppm = np.asarray(ppm, float)
+    spectra = np.asarray(spectra).reshape(-1, ppm.size)
+    spectra = spectra[np.any(spectra != 0, axis=1)]
+    mhz = larmor_hz * 1e-6
+    hz = (ppm - 4.7) * mhz
+    magnitude = np.abs(spectra)
+
+    def nearest(f):
+        return int(np.argmin(np.abs(hz - f)))
+
+    # S/N: the NAA peak over the spread of the 40 highest-ppm points
+    noise = np.std(spectra[:, np.argsort(ppm)[-40:]].real, axis=1)
+    snr = magnitude[:, nearest((OFFSET_PEAKS["NAA"] - 4.7) * mhz)] / np.maximum(noise, 1e-30)
+    good = snr > np.median(snr)
+    if good.sum() < 10:
+        raise ValueError(f"{good.sum()} spectra are too few to measure the frequency offset")
+    t = np.arange(n_points) * dwell
+    lorentzian, gaussian = (w * mhz for w in PHIVE_LINE_PPM)
+    shape = np.exp(-np.pi * lorentzian * t - (np.pi * gaussian * t) ** 2 / (4 * np.log(2)))
+    # Overlapping lines (NAAG, PCr, ...) move the peaks; the synthetic carries them too.
+    mix = truth(names, PHIVE_MIX)
+    fid = sum(c * fids[:n_points, names.index(name)] for name, c in mix.items()) * shape
+    reference = np.abs(np.exp(-2j * np.pi * np.outer(hz, t)) @ fid)[None]
+    offsets = {}
+    for name, ppm0 in OFFSET_PEAKS.items():
+        f_basis = peak_hz(reference, hz, nearest((ppm0 - 4.7) * mhz))[0]
+        offsets[name] = peak_hz(magnitude[good], hz, nearest(f_basis)) - f_basis
+    record = {name + "_hz": float(np.nanmedian(v)) for name, v in offsets.items()}
+    offset = float(np.nanmedian(np.concatenate(list(offsets.values()))))
+    return dict(hz=offset, voxels=int(good.sum()), **record)
+
+
+def window_ppm(grid, n):
+    """ppm of a deep fitter's input window, as run_deepmrsi.py writes it."""
+    parent = int(grid["signal_length"])
+    step = 1.0 / (grid["dwelltime_s"] * parent * grid["reference_frequency_mhz"])
+    return 4.7 + (int(grid["interval_bounds"][0]) + np.arange(n) - (parent >> 1)) * step
+
+
 def fit_deep_synthetic(
-    fitter,
-    info,
-    water_fit,
-    water_amplitude,
-    n_points,
-    seed=0,
-    linewidth_ppm=METABOLITE_LW_PPM,
-    sources=(),
+    fitter, info, water_fit, water_amplitude, n_points, point, seed=0, sources=()
 ):
-    """The synthetic spectrum through PHIVE (dlfit) or SpatialRegu (gpufit) on a small grid of
-    identical voxels: F per group, A_w, the concentrations and the inputs."""
+    """The synthetic spectrum at an operating point through PHIVE (dlfit) or SpatialRegu
+    (gpufit) on a small grid of identical voxels: F per group, A_w, the concentrations, the
+    inputs and the fitter's input spectra with their ppm axis."""
     import deep_crt_mrsi.deepmrsi as fire
 
     info = dict(info, b0_corrected=True)
@@ -419,20 +509,26 @@ def fit_deep_synthetic(
     fit = (fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter)(info, False)
     fids, names, dt, larmor_mhz, basis_path = deep_basis(fitter, info)
     a_p, a_p_record = deep_a_p(fids, names, dt, larmor_mhz, source_candidates(sources))
-    present = truth(names)
+    present = truth(names, point["mix"])
     met = np.zeros(n_points, complex)
     for name, c in present.items():
         column = fids[:n_points, names.index(name)]
         met[: column.size] += c * column
     larmor = float(info["larmor_frequency"])
-    met *= np.exp(-np.pi * linewidth_ppm * larmor * 1e-6 * np.arange(n_points) * dt)
+    t = np.arange(n_points) * dt
+    lorentzian, gaussian = (point[k] * larmor * 1e-6 for k in ("lorentzian_ppm", "gaussian_ppm"))
+    met *= np.exp(
+        -np.pi * lorentzian * t
+        - (np.pi * gaussian * t) ** 2 / (4 * np.log(2))
+        + 2j * np.pi * point["offset_hz"] * t
+    )
     met *= water_amplitude / (2 * WATER_MM * a_p)
     # The fitters conjugate their input, so the data carry the conjugate of the model.
     data = add_noise(np.broadcast_to(np.conj(met), DEEP_GRID + (n_points,)), seed).astype(
         np.complex64
     )
     mask = np.ones(DEEP_GRID, dtype=bool)
-    images, out_names = fit(data, mask)[:2]
+    images, out_names, _, _, windowed, grid = fit(data, mask)
     out_names = list(out_names)
     fitted = {
         group: float(np.median(np.asarray(images[out_names.index(name)])[mask]))
@@ -440,29 +536,40 @@ def fit_deep_synthetic(
         if name in out_names
     }
     estimated = water_fit(synthetic_water(water_amplitude, n_points, dt, larmor), dt)
-    return (
-        fitted,
-        estimated,
-        present,
-        {
-            "a_p": a_p,
-            **a_p_record,
-            "basis": os.path.normpath(basis_path),
-            "basis_sha256": sha256(basis_path),
-            "larmor_hz": larmor,
-            "dwell_s": dt,
-            "points": n_points,
-            "fitter": fitter,
-        },
-    )
+    windowed = np.asarray(windowed).reshape(-1, np.shape(windowed)[-1])
+    inputs = {
+        "a_p": a_p,
+        **a_p_record,
+        "basis": os.path.normpath(basis_path),
+        "basis_sha256": sha256(basis_path),
+        "larmor_hz": larmor,
+        "dwell_s": dt,
+        "points": n_points,
+        "fitter": fitter,
+    }
+    return fitted, estimated, present, inputs, (windowed, window_ppm(grid, windowed.shape[1]))
 
 
-def calibrate_deep(fitter, info, water_fit, water_amplitude, n_points, sources=()):
-    """C_fit of PHIVE (dlfit) or SpatialRegu (gpufit) for the data's field and grid."""
-    fitted, estimated, present, inputs = fit_deep_synthetic(
-        fitter, info, water_fit, water_amplitude, n_points, sources=sources
+def calibrate_deep(fitter, info, water_fit, water_amplitude, n_points, invivo=None, sources=()):
+    """C_fit of PHIVE (dlfit) or SpatialRegu (gpufit) for the data's field and grid. PHIVE's is
+    per group, at the frequency offset of invivo = (its input spectra, their ppm axis)."""
+    offset = None
+    if fitter == "dlfit":
+        if invivo is None:
+            raise ValueError("PHIVE's calibration needs the spectra it fitted")
+        fids, names, dt, _, _ = deep_basis(fitter, info)
+        offset = frequency_offset(*invivo, fids, names, dt, info["larmor_frequency"], n_points)
+    point = operating_point(fitter, offset["hz"] if offset else 0.0)
+    fitted, estimated, present, inputs, _ = fit_deep_synthetic(
+        fitter, info, water_fit, water_amplitude, n_points, point, sources=sources
     )
     c_fit, per_group = constants(fitted, estimated, present)
-    return c_fit, dict(
-        inputs, C_per_metabolite=per_group, synthetic=synthetic_record(present, water_amplitude)
+    record = dict(
+        inputs,
+        C_per_metabolite=per_group,
+        per_group=fitter == "dlfit",
+        synthetic=synthetic_record(present, water_amplitude, point),
     )
+    if offset:
+        record["frequency_offset"] = offset
+    return c_fit, record
