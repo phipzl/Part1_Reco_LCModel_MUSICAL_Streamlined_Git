@@ -94,19 +94,20 @@ if(~FastPIReprocess_flag)
 	end
     
 
-    % In case we are processing water data and it has no coilcompressscan, but the metabo scan has, then use the metabo scan
-    if(IsWatRef && ( (~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan))) ...
-                   || (isempty(image) || ~isfield(image,'Data')) )  )
+    % The water pass compresses and noise-decorrelates with the metabo scan's coilcompressscan, number of
+    % coils and noise: its coil weights are applied to the metabo scan's channels. If the water scan has
+    % no image, use the metabo scan's.
+    if(IsWatRef)
         MetCSIPar = load([tmp_dir '/Parameters.mat']);
         Settis.OmitDataSets = {'ONLINE'};
-        [~, image2, ~,coilcompressscan2] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
-        if((~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan))))
-            coilcompressscan = coilcompressscan2;
+        [MetCSI, image2, NoiseData2,coilcompressscan] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
+        if(isfield(MetCSI.Par,'coilcompression_to_numb_coils'))
+            csi.Par.coilcompression_to_numb_coils = MetCSI.Par.coilcompression_to_numb_coils;
         end
         if((isempty(image) || ~isfield(image,'Data')))
             image = image2;
         end
-        clear image2 coilcompressscan2;
+        clear MetCSI image2;
     end
     % Also use the no of coilcompression from the Water-scan
     if(~IsWatRef && exist([Par.Paths.out_path '/WaterReference.mat' ],'file'))
@@ -115,6 +116,11 @@ if(~FastPIReprocess_flag)
             fprintf('\nWarning: Water and Metabo MRSI scans don''t have the same coil compression number.');
         end
         csi.Par.coilcompression_to_numb_coils = WaterData.WaterReferenceCSI.Par.coilcompression_to_numb_coils;
+        % And the compression basis the water weights are expressed in. It is the first metabo file's,
+        % which other averages would not reproduce with an SVD of their own.
+        if(isfield(WaterData,'V_cK'))
+            WaterV_cK = WaterData.V_cK;
+        end
         clear WaterData;
     end
     
@@ -391,7 +397,7 @@ if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') &
     disp(Text)
 
     %set water data equals to image from iMUsical PRescan
-    for ii = 1:size(csi.Data,2); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
+    for ii = 1:size(coilcompressscan.CoilCompScan.Data,2); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
     water.Data = cat(1,wuff.Data{:});
     clear wuff
     
@@ -404,8 +410,12 @@ if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') &
      % Data_kc=permute(reshape(sqz(mrsiReconParams.SENSE),[NbCoil M*N]),[2 1]);
      % Data_kc=permute(reshape(sqz(sum(mrsiData_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil NbAng*NbTilt]),[2 1]);
 
-     [~,~,V_cK]=svd(water.Data,0);
-     V_cK=single(V_cK(:,1:K));
+     if(exist('WaterV_cK','var'))
+         V_cK = WaterV_cK;
+     else
+         [~,~,V_cK]=svd(water.Data,0);
+         V_cK=single(V_cK(:,1:K));
+     end
 
       %Water data
 %      Temp=zeros([rest K],'single');
@@ -1641,6 +1651,9 @@ end
             save([Par.Paths.out_path '/WaterReference.mat' ], 'WaterReferenceCSI'); clear WaterReferenceCSI
             if(exist('weights','var'))
                 save([Par.Paths.out_path '/WaterReference.mat' ],'weights','-append')
+            end
+            if(exist('V_cK','var'))
+                save([Par.Paths.out_path '/WaterReference.mat' ],'V_cK','-append')
             end
 
             % W2 --> Prepare appropriate LCModel processing
