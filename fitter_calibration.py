@@ -38,18 +38,11 @@ TRUTH = {
 GROUPS = {
     "tNAA": ("NAA", "NAAG"),
     "tCr": ("Cr", "PCr"),
-    "tCho": ("GPC", "PCh"),
+    "tCho": ("GPC", "PCh", "Cho"),
     "Glu": ("Glu",),
     "mIns": ("Ins",),
 }
-# Names the fitters report the groups under, first match wins.
-LCMODEL_NAMES = {
-    "tNAA": ("NAA+NAAG", "NAA"),
-    "tCr": ("Cr+PCr", "Cr"),
-    "tCho": ("GPC+PCh", "Cho+GPC+PCh"),
-    "Glu": ("Glu",),
-    "mIns": ("Ins", "mI"),
-}
+# The deep fitters' names for the groups
 DEEP_NAMES = {"tNAA": "tNAA", "tCr": "tCr", "tCho": "tCho", "Glu": "Glu", "mIns": "Ins"}
 # Line widths in ppm (3 Hz metabolites, 5 Hz Lorentzian and 3.7 Hz Gaussian water at 3T),
 # noise relative to the metabolite FID's first point.
@@ -210,14 +203,13 @@ def read_lcmodel_table(path):
     return {name: (float(conc), int(sd)) for conc, sd, name in rows}
 
 
-def lcmodel_groups(table):
-    """The GROUPS' concentrations under LCModel's names."""
-    out = {}
-    for group, names in LCMODEL_NAMES.items():
-        name = next((n for n in names if n in table), None)
-        if name is not None:
-            out[group] = table[name][0]
-    return out
+def lcmodel_groups(table, present):
+    """The GROUPS' concentrations, summed over the members LCModel reports."""
+    return {
+        group: sum(table[m][0] for m in members if m in table)
+        for group, members in GROUPS.items()
+        if any(m in present for m in members) and all(m in table for m in members if m in present)
+    }
 
 
 def fit_lcmodel_synthetic(
@@ -272,7 +264,7 @@ def fit_lcmodel_synthetic(
         raise RuntimeError(f"LCModel did not fit the synthetic spectrum, see {workdir}")
     estimated = water_fit(synthetic_water(water_amplitude, nunfil, deltat, hzpppm * 1e6), deltat)
     return (
-        lcmodel_groups(table),
+        lcmodel_groups(table, present),
         estimated,
         present,
         {

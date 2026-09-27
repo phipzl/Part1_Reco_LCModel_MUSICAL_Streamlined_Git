@@ -39,11 +39,13 @@ DEEP_FITTERS = {"SpatialRegu": "gpufit", "PHIVE": "dlfit"}
 def fit_water(fid, dt, t0=0.0):
     """Voigt fit of one water FID: amplitude at t0, FWHM and frequency in Hz, relative residual.
 
-    Model a exp(2 pi i f t - pi L t - (g t)^2) on the points from FIT_FIRST_POINT on.
+    Model a exp(2 pi i f t - pi L t - (g t)^2) on the points from FIT_FIRST_POINT past t0 on.
     """
-    n = np.arange(
-        FIT_FIRST_POINT, max(FIT_FIRST_POINT + 8, min(fid.size, int(round(FIT_SECONDS / dt))))
-    )
+    first = FIT_FIRST_POINT + int(np.ceil(t0 / dt - 1e-6))
+    last = min(fid.size, max(first + 16, int(round((t0 + FIT_SECONDS) / dt))))
+    if last - first < 16:
+        raise ValueError(f"a water FID of {fid.size} points leaves too few to fit past t0 = {t0} s")
+    n = np.arange(first, last)
     t, y = n * dt, np.asarray(fid, complex)[n]
     f0 = np.angle(np.sum(y[1:10] * np.conj(y[:9]))) / (2 * np.pi * dt)
     lw0 = max(1.0, -np.polyfit(t[:30], np.log(np.abs(y[:30]) + 1e-30), 1)[0] / np.pi)
@@ -93,21 +95,12 @@ def load_water(out_path):
         source = (
             "WaterReferenceOnCSIGrid" if "WaterReferenceOnCSIGrid" in names else "WaterReferenceCSI"
         )
-        loaded = scipy.io.loadmat(
-            path, variable_names=[source], squeeze_me=True, struct_as_record=False
-        )[source]
-        water = loaded if source == "WaterReferenceOnCSIGrid" else loaded.Data
+        loaded = scipy.io.loadmat(path, variable_names=[source])[source]
+        water = loaded if source == "WaterReferenceOnCSIGrid" else loaded["Data"][0, 0]
     first_sample = 0.0
     if source == "WaterReferenceOnCSIGrid":
-        te_us = float(
-            np.ravel(
-                scipy.io.loadmat(
-                    os.path.join(out_path, "Parameters.mat"),
-                    squeeze_me=True,
-                    struct_as_record=False,
-                )["Par"].CSI.TEs
-            )[0]
-        )
+        par = scipy.io.loadmat(os.path.join(out_path, "Parameters.mat"), struct_as_record=False)
+        te_us = float(np.ravel(par["Par"][0, 0].CSI[0, 0].TEs)[0])
         first_sample = te_us * 1e-6 if te_us < 10000 else 0.0
     return np.asarray(water, np.complex64), source, first_sample
 
@@ -163,16 +156,8 @@ def main(tmp_dir):
     out_path = csi_io.read_out_path(tmp_dir)
     combined = csi_io.combined_path(tmp_dir)
     maps_dir = os.path.join(out_path, "maps")
-    template = nib.load(
-        next(
-            p
-            for p in (
-                os.path.join(maps_dir, "csi_template.nii.gz"),
-                os.path.join(maps_dir, "csi_template.nii"),
-            )
-            if os.path.isfile(p)
-        )
-    )
+    template_path = os.path.join(maps_dir, "csi_template.nii.gz")
+    template = nib.load(template_path if os.path.isfile(template_path) else template_path[:-3])
     with open(os.path.join(tmp_dir, "InitialParameters.json")) as f:
         par = json.load(f)
     dwell, larmor, points = recopar(combined)

@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import scipy.io
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import fitter_calibration as calibration  # noqa: E402
@@ -73,6 +74,14 @@ def voigt(amplitude, lorentz_hz, gauss_fwhm_hz, freq_hz, n=288, dt=DT, delay=0.0
     )
 
 
+def matlab_first_order_delay(fid, te, dt):
+    """The first-order phase correction MRSI_Reconstruction.m applies to the W1 water pass."""
+    n = fid.size
+    omega_step = 2 * np.pi / ((n - 1) * dt)
+    correction = np.exp(-1j * te * omega_step * np.arange(-(n // 2), n - n // 2))
+    return np.fft.ifft(np.fft.ifftshift(np.fft.fftshift(np.fft.fft(fid)) * correction))
+
+
 class VoigtEstimator(unittest.TestCase):
     def test_lorentzian(self):
         q = water_scaling.fit_water(voigt(5.0, 8.0, 0.0, -12.0), DT)
@@ -94,11 +103,21 @@ class VoigtEstimator(unittest.TestCase):
         half.sort()
         self.assertAlmostEqual(q["fwhm_hz"], (half[-1] - half[0] + 1) / (2**17 * 1e-4), delta=0.15)
 
-    def test_amplitude_at_the_first_sample_skips_distorted_points(self):
-        fid = voigt(5.0, 10.0, 6.0, 0.0, delay=1e-3)
+    def test_distorted_first_points(self):
+        fid = voigt(5.0, 10.0, 6.0, 0.0)
         fid[:3] = [0.1, 2.0, -1.0]
-        q = water_scaling.fit_water(fid, DT, t0=1e-3)
-        self.assertAlmostEqual(q["amplitude"], 5.0, delta=5e-4)
+        self.assertAlmostEqual(water_scaling.fit_water(fid, DT)["amplitude"], 5.0, delta=5e-4)
+
+    def test_too_short(self):
+        with self.assertRaises(ValueError):
+            water_scaling.fit_water(voigt(5.0, 7.0, 8.0, 10.0, n=32, dt=3.6e-4), 3.6e-4, t0=9e-3)
+
+    def test_water_delayed_by_the_matlab_route(self):
+        for dt, te, n in ((1.06e-3, 1.0e-3, 288), (3.6e-4, 1.3e-3, 840)):
+            fid = matlab_first_order_delay(voigt(5.0, 7.0, 8.0, 10.0, n=n, dt=dt), te, dt)
+            with self.subTest(dt=dt, te=te):
+                amplitude = water_scaling.fit_water(fid, dt, t0=te)["amplitude"]
+                self.assertAlmostEqual(amplitude, 5.0, delta=0.05)
 
     def test_noise(self):
         rng = np.random.default_rng(3)
@@ -109,6 +128,46 @@ class VoigtEstimator(unittest.TestCase):
             errors.append(water_scaling.fit_water(fid, DT)["amplitude"] - 1.0)
         self.assertLess(abs(np.mean(errors)), 0.005)
         self.assertLess(np.std(errors), 0.01)
+
+
+class Inputs(unittest.TestCase):
+    def test_single_slice_water(self):
+        water = np.full((4, 4, 1, 32), 1 + 1j, np.complex64)
+        for name, content in (
+            ("WaterReferenceOnCSIGrid", water),
+            ("WaterReferenceCSI", {"Data": water}),
+        ):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as out:
+                scipy.io.savemat(os.path.join(out, "WaterReference.mat"), {name: content})
+                scipy.io.savemat(
+                    os.path.join(out, "Parameters.mat"), {"Par": {"CSI": {"TEs": 1300.0}}}
+                )
+                loaded, source, first_sample = water_scaling.load_water(out)
+                self.assertEqual((loaded.shape, source), ((4, 4, 1, 32), name))
+                self.assertAlmostEqual(
+                    first_sample, 1.3e-3 if name == "WaterReferenceOnCSIGrid" else 0
+                )
+
+    def test_lcmodel_groups_sum_their_members(self):
+        table = {
+            "NAA": (8.0, 3),
+            "NAAG": (1.0, 9),
+            "Cr": (3.0, 4),
+            "PCr": (4.5, 5),
+            "GPC": (1.0, 6),
+            "PCh": (0.5, 9),
+            "Cho": (0.3, 20),
+            "Glu": (7.0, 5),
+            "Ins": (5.0, 5),
+            "Tau": (1.0, 9),
+        }
+        present = {name: 1.0 for name in ("NAA", "NAAG", "Cr", "PCr", "GPC", "PCh", "Glu", "Ins")}
+        self.assertEqual(
+            calibration.lcmodel_groups(table, present),
+            {"tNAA": 9.0, "tCr": 7.5, "tCho": 1.8, "Glu": 7.0, "mIns": 5.0},
+        )
+        del table["PCr"]
+        self.assertNotIn("tCr", calibration.lcmodel_groups(table, present))
 
 
 class RoundTrip(unittest.TestCase):
