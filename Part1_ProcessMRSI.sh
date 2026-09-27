@@ -392,7 +392,7 @@ optional:
 -t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If a minc or NIfTI file is given instead of folder, it is treated as the magnitude file.
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
--w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
+-w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression. \"W3,[file]\" runs the W1 water pass, fits without water scaling and scales every fitter's result to the water afterwards: [output directory]/maps/Orig_[fitter]/[met]_iu_map.nii.gz in institutional units, water maps in maps/WaterReference.
 -X  [XPACE MOTION LOG]      XPACE MOTION LOG
 
 Flags:
@@ -411,6 +411,7 @@ Flags:
 done
 
 shift $((OPTIND - 1))
+prepare_water_scaling
 check_julia_deepmrsi_options
 
 # A mask file given with -m: anything that is not a method name. It has to exist
@@ -539,6 +540,7 @@ run_matlab_post_reconstruction
 ########### START LCMODEL PROCESSING OF SINGLE VOXEL DATA ON CPU CORES ############
 STARTLCM=$(date +%s.%N)
 echo -e "\n\n7. Start LCModel Processing\n\n"
+[[ $WaterScaling_flag -eq 1 ]] && unscale_lcm_controls
 [[ -n $(deepmrsi_fitting) ]] && run_deepmrsi_fit
 if [[ $SpectralFitting_Method == "LCModel" ]]; then
     curdir=$(pwd)
@@ -568,6 +570,7 @@ if [[ $SpectralFitting_Method == "LCModel" ]]; then
     DIFFLCM=$(echo "$ENDLCM - $STARTLCM" | bc)
     echo -e "\n\n8. Total Processing time of LCModel: " $DIFFLCM "\n\n"
 fi
+[[ $WaterScaling_flag -eq 1 ]] && run_water_scaling
 
 # 8.
 ############ WRITE THE SOURCECODE THAT WAS USED TO OUT-DIR ############
