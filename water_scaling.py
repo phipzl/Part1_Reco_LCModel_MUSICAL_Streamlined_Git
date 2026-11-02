@@ -41,8 +41,9 @@ from scipy.optimize import least_squares
 FIT_FIRST_POINT = 3
 FIT_SECONDS = 0.16
 DEEP_FITTERS = {"SpatialRegu": "gpufit", "PHIVE": "dlfit"}
-# The slab profile is not modelled: partitions this close to the VOI edge get no mmol/kg.
-EDGE_MARGIN_MM = 4.5
+# The slab profile is not modelled: partitions centred closer than this to the VOI edge get
+# no mmol/kg.
+EDGE_MARGIN_MM = 15.0
 
 
 def fit_water(fid, dt, t0=0.0):
