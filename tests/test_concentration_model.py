@@ -171,6 +171,15 @@ class Grid(unittest.TestCase):
             ),
         )
 
+    def test_kspace_weight_zero_filled(self):
+        weight = model.mrsi_kspace_weight(self.shape, acquired=(12, 12, 7))
+        planes = np.flatnonzero(weight.any(axis=(0, 1)))
+        index = np.fft.fftfreq(self.shape[2], 1 / self.shape[2])
+        self.assertEqual(sorted(index[planes]), list(range(-3, 4)))
+        # The central partition's six circles reach 6 / 12 cycles per acquired voxel
+        kx = np.fft.fftfreq(20, 1 / 20)
+        self.assertEqual(np.abs(kx[np.flatnonzero(weight[:, 0, 0])]).max(), 5)
+
     def test_uniform_and_edge(self):
         uniform = np.ones((120, 120, 180))
         half = (self.x >= 0).astype(float)
