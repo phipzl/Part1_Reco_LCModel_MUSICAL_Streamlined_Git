@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Scale the fitters' results to the water reference, outside the fitters (-w W3).
 
-    python water_scaling.py <tmp_dir>
+    python water_scaling.py <tmp_dir> [--tissue GM,WM,CSF --b1 <flip angle map>]
 
 Per voxel c = C_fit * F / A_w: F the fitter's result, A_w the water amplitude at the
 water FID's first sample and C_fit the fitter's constant (fitter_calibration.py; PHIVE
 has one per metabolite group). The unit is the institutional unit of pure water,
 55556 mM with two protons; relaxation, saturation and the tissue water content are not
-corrected.
+corrected. With the tissue partial volumes and a B1 map, the groups tNAA, tCr, tCho, Glu
+and mIns also get mmol/kg tissue water (concentration_model.py).
 
 Reads  <out_path>/WaterReference.mat   the W1 water pass, on the metabolite grid
        <out_path>/spectra/*.table      LCModel, fitted without water scaling
@@ -15,9 +16,12 @@ Reads  <out_path>/WaterReference.mat   the W1 water pass, on the metabolite grid
        <out_path>/maps/SpecMap_PHIVEInput_{real,imag}.nii.gz   the spectra PHIVE fitted
 Writes <out_path>/maps/Orig_<Fitter>/<met>_iu_map.nii.gz
        <out_path>/maps/WaterReference/Water_{amp,fwhm_Hz,shift_Hz,residual}_map.nii.gz
+       <out_path>/maps/Orig_<Fitter>/<met>_mM_map.nii.gz   with --tissue and --b1
+       <out_path>/maps/WaterReference/{GM,WM,CSF}_fraction_map, B1_relative_map, ...
        <out_path>/maps/WaterReference/water_scaling.json   C_fit with its inputs
 """
 
+import argparse
 import glob
 import json
 import os
@@ -25,6 +29,7 @@ import re
 import sys
 
 import combined_csi_io as csi_io
+import concentration_model as model
 import fitter_calibration as calibration
 import h5py
 import nibabel as nib
@@ -36,6 +41,9 @@ from scipy.optimize import least_squares
 FIT_FIRST_POINT = 3
 FIT_SECONDS = 0.16
 DEEP_FITTERS = {"SpatialRegu": "gpufit", "PHIVE": "dlfit"}
+# The slab profile is not modelled: partitions centred closer than this to the VOI edge get
+# no mmol/kg.
+EDGE_MARGIN_MM = 15.0
 
 
 def fit_water(fid, dt, t0=0.0):
@@ -116,9 +124,113 @@ def recopar(combined):
     return dwell, larmor, points
 
 
-def concentration_correction(shape):
-    """Per-voxel factor from institutional units to mM (saturation, tissue water, CSF): none yet."""
-    return np.ones(shape, np.float32), None
+def load_b1(path):
+    """Relative B1, its affine and record: a Siemens flip angle map (DICOM), or a NIfTI of
+    relative B1 with a JSON beside it giving the reference amplitude it was measured with."""
+    if not path.endswith((".nii", ".nii.gz")):
+        return model.siemens_b1_map(path)
+    sidecar = re.sub(r"\.nii(\.gz)?$", ".json", path)
+    if not os.path.isfile(sidecar):
+        sys.exit(f"ERROR: {sidecar} with the B1 map's reference_amplitude_v is missing.")
+    with open(sidecar) as f:
+        record = json.load(f)
+    if "reference_amplitude_v" not in record:
+        sys.exit(f"ERROR: {sidecar} has no reference_amplitude_v.")
+    image = nib.load(path)
+    return (
+        np.asarray(image.dataobj, float).reshape(image.shape[:3]),
+        image.affine,
+        dict(record, file=path),
+    )
+
+
+def concentration_correction(
+    template, mask, tissue, b1, met_file, water_file, edge_margin_mm, min_brain=0.9
+):
+    """{group: factor} from institutional units to mmol/kg tissue water (concentration_model),
+    the maps it rests on and its record. Voxels outside the inner partitions of the VOI,
+    with less than min_brain brain tissue (GM + WM + CSF of the excited volume) or no B1 get 0."""
+    shape, csi_affine = template.shape[:3], template.affine
+    met, water = model.read_protocol(met_file), model.read_protocol(water_file)
+    images = [nib.load(path) for path in tissue]
+    pve = np.stack([np.asarray(image.dataobj, float).reshape(image.shape[:3]) for image in images])
+    profile = model.voi_profile(met, shape[2])
+    averaged = model.psf_average(
+        np.concatenate([pve, np.ones((1,) + pve.shape[1:])]),
+        images[0].affine,
+        csi_affine,
+        shape,
+        profile=profile,
+    )
+    coverage = averaged[3]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        volume = np.clip(np.where(coverage > 0.05, averaged[:3] / coverage, 0), 0, 1)
+    brain = volume.sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        volume = np.where(brain > 0, volume / np.where(brain > 0, brain, 1), 0)
+    b1_map, b1_affine, b1_record = load_b1(b1)
+    b1_grid, b1_support = model.b1_on_grid(b1_map, b1_affine, csi_affine, shape)
+    inner = model.inner_partitions(met, shape[2], edge_margin_mm)
+    valid = mask & inner[None, None, :] & (brain >= min_brain) & (b1_support > 0.5)
+    factors = model.correction_factors(
+        volume, b1_grid, met, water, b1_record["reference_amplitude_v"]
+    )
+    factors = {
+        g: np.where(valid & np.isfinite(f), f, 0).astype(np.float32) for g, f in factors.items()
+    }
+    maps = {
+        "GM_fraction": volume[0],
+        "WM_fraction": volume[1],
+        "CSF_fraction": volume[2],
+        "brain_fraction": brain,
+        "excited_fraction": coverage,
+        "B1_relative": b1_grid,
+        "flip_deg_metabolite": np.degrees(
+            model.actual_flip(met, b1_grid, b1_record["reference_amplitude_v"])
+        ),
+        "flip_deg_water": np.degrees(
+            model.actual_flip(water, b1_grid, b1_record["reference_amplitude_v"])
+        ),
+        "molal_valid": valid.astype(np.float32),
+        **{f"molal_factor_{g}": f for g, f in factors.items()},
+    }
+    field = model.field_of(met["b0_t"])
+    record = {
+        "unit": "mmol/kg tissue water (molal)",
+        "formula": "[M] = c_iu * 55510/55556 * sum_t f_t R_W,t / (f_GM R_M,GM + f_WM R_M,WM), "
+        "f_t = v_t d_t / sum v d, R = sin a (1 - E1) / (1 - cos a E1) * exp(-TE / T2), "
+        "a = nominal flip * B1 * reference amplitude / B1 map's",
+        "method": "Gasparovic 2006 with CSF correction, as Near 2021 eq. 4 and 5",
+        "protons": "in C_fit: each fitter's basis carries its metabolites' protons, the water 2",
+        "field": field,
+        "metabolite_scan": met,
+        "water_scan": water,
+        "b1": b1_record,
+        "tissue": {
+            "files": list(tissue),
+            "order": "GM, WM, CSF",
+            "grid": "partial volumes x the VOI box along the partitions, filtered with the "
+            "reconstruction's k-space weight (disk per partition, Hamming in-plane and in kz), "
+            "divided by the filtered box",
+        },
+        "valid": {
+            "edge_margin_mm": edge_margin_mm,
+            "inner_partitions": np.flatnonzero(inner).tolist(),
+            "min_brain_fraction": min_brain,
+            "voxels": int(valid.sum()),
+        },
+        "constants": {
+            "relaxation": model.CONSTANTS[field],
+            "water_content": model.WATER_CONTENT,
+            "water_molal_mmol_per_kg": model.H2O_MOLAL,
+            "iu_water_mM": model.IU_WATER_MM,
+        },
+        "sources": model.SOURCES,
+        "median_factor": {
+            g: float(np.median(f[valid])) if valid.any() else None for g, f in factors.items()
+        },
+    }
+    return factors, maps, record
 
 
 def write_map(folder, name, volume, template):
@@ -168,7 +280,7 @@ def fitter_input(maps_dir, label, mask):
     return spectra[mask], ppm
 
 
-def main(tmp_dir):
+def main(tmp_dir, tissue=None, b1=None, edge_margin_mm=EDGE_MARGIN_MM):
     out_path = csi_io.read_out_path(tmp_dir)
     combined = csi_io.combined_path(tmp_dir)
     maps_dir = os.path.join(out_path, "maps")
@@ -207,14 +319,30 @@ def main(tmp_dir):
         f"{np.median(qc['fwhm_hz'][mask]):.2f} Hz"
     )
 
-    correction, correction_source = concentration_correction(shape)
-    scale = np.where(mask & (a_w > 0), correction / np.where(a_w > 0, a_w, 1), 0)
+    scale = np.where(mask & (a_w > 0), 1 / np.where(a_w > 0, a_w, 1), 0)
+    factors, correction = {}, None
+    if tissue and b1:
+        met_file = par.get("csi_path") or [""]
+        met_file = met_file[0] if isinstance(met_file, list) else met_file
+        water_file = par.get("WaterReference_MethodAndFile", "").split(",")[-1].strip()
+        factors, correction_maps, correction = concentration_correction(
+            template, mask, tissue, b1, met_file, water_file, edge_margin_mm
+        )
+        for name, volume in correction_maps.items():
+            write_map(water_dir, f"{name}_map", volume, template)
+        inner = correction["valid"]["inner_partitions"]
+        print(
+            "water_scaling: mmol/kg tissue water on "
+            f"{correction['valid']['voxels']} voxels, partitions "
+            f"{f'{inner[0]}-{inner[-1]}' if inner else 'none'}, median factors "
+            + ", ".join(f"{g} {v:.3f}" for g, v in correction["median_factor"].items() if v)
+        )
     record = {
         "method": "W3",
         "formula": "c = C_fit * F / A_w",
         "unit": "institutional units: pure water 55556 mM with 2 protons, no relaxation, "
-        "saturation or water-content correction",
-        "correction": correction_source,
+        "saturation or water-content correction; <met>_mM_map: see correction",
+        "correction": correction,
         "water": {
             "file": os.path.join(out_path, "WaterReference.mat"),
             "source": source,
@@ -245,7 +373,7 @@ def main(tmp_dir):
         )
         record["fitters"]["LCModel"] = dict(C_fit=c_fit, **inputs)
         fitted = lcmodel_amplitudes(os.path.join(out_path, "spectra"), shape)
-        write_scaled("LCModel", fitted, c_fit, {}, scale, maps_dir, template)
+        write_scaled("LCModel", fitted, c_fit, {}, scale, maps_dir, template, factors)
     bases = par.get("basis_path") or []
     for label, fitter in DEEP_FITTERS.items():
         folder = os.path.join(maps_dir, f"Orig_{label}")
@@ -276,24 +404,52 @@ def main(tmp_dir):
                 f"water_scaling: {label} synthetic at {offset['hz']:+.2f} Hz, the offset of its "
                 f"input (NAA {offset['NAA_hz']:+.2f}, Cr {offset['Cr_hz']:+.2f} Hz)"
             )
-        write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template)
+        write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template, factors)
 
     with open(os.path.join(water_dir, "water_scaling.json"), "w") as f:
         json.dump(record, f, indent=1)
     print(f"water_scaling: done, {os.path.join(water_dir, 'water_scaling.json')}")
 
 
-def write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template):
-    """The <met>_iu_maps, with a group's own constant where per_group has one."""
+def write_scaled(label, fitted, c_fit, per_group, scale, maps_dir, template, factors=None):
+    """The <met>_iu_maps, with a group's own constant where per_group has one, and the
+    <met>_mM_maps of the groups with a molal factor."""
     folder = os.path.join(maps_dir, f"Orig_{label}")
+    molal = []
     for name, amplitude in fitted.items():
         c = per_group.get(calibration.group_of(name), c_fit)
-        write_map(folder, f"{name}_iu_map", c * amplitude * scale, template)
+        iu = c * amplitude * scale
+        write_map(folder, f"{name}_iu_map", iu, template)
+        group = model.group_of(name)
+        if factors and group in factors:
+            write_map(folder, f"{name}_mM_map", iu * factors[group], template)
+            molal.append(name)
+    if molal:
+        print(f"water_scaling: {label} mmol/kg maps of {', '.join(molal)}")
     groups = "".join(f", {group} {c:.5g}" for group, c in per_group.items())
     print(f"water_scaling: {label} C_fit {c_fit:.5g}{groups}, {len(fitted)} maps in {folder}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("tmp_dir")
+    parser.add_argument(
+        "--tissue", help="GM,WM,CSF partial volume NIfTIs (e.g. FAST pve_1,pve_2,pve_0)"
+    )
+    parser.add_argument(
+        "--b1", help="Siemens flip angle map (DICOM), or relative B1 NIfTI with a JSON"
+    )
+    parser.add_argument(
+        "--edge-margin-mm",
+        type=float,
+        default=EDGE_MARGIN_MM,
+        help="partitions closer than this to the VOI edge get no mmol/kg",
+    )
+    args = parser.parse_args()
+    if bool(args.tissue) != bool(args.b1):
+        sys.exit("ERROR: mmol/kg needs both --tissue and --b1.")
+    main(
+        args.tmp_dir, args.tissue.split(",") if args.tissue else None, args.b1, args.edge_margin_mm
+    )
