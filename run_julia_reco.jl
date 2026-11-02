@@ -201,7 +201,8 @@ end
 """The metabolite pass's half: the water left by `write_uncombined_water`, combined with
 the coil weights the metabolite CSI was combined with (ICE: its PATREFSCAN `patref` at
 point 5), so the receive field cancels and no gain is left between the two; resampled to
-the metabolite dwell time and written as WaterReferenceCSI with those weights."""
+the metabolite dwell time, at most as long as the metabolite FID, and written as
+WaterReferenceCSI with those weights and the metabolite scan's channel count."""
 function combine_uncombined_water(path, watref_path, patref, mixing, water_scan, met_scan)
     stored = matread(path)
     weights = MRSI.coil_combine_weights(patref)
@@ -210,8 +211,11 @@ function combine_uncombined_water(path, watref_path, patref, mixing, water_scan,
     println("Julia: water reference combined with the metabolite scan's coil weights, resampled from " *
             "$(water_dwell / 1e3) to $(met_dwell / 1e3) us")
     water = resample_fid(water, water_dwell, met_dwell)
+    n_met = met_scan[:ONLINE][:n_fid]
+    size(water, 4) > n_met && (water = water[:, :, :, 1:n_met])
     par = Dict{String,Any}("Route" => "metabolite_grid", "SlabOffset_mm" => stored["SlabOffset_mm"],
-                           "AcquiredDwelltime" => float(water_dwell), "CoilWeights" => "metabolite PATREFSCAN")
+                           "AcquiredDwelltime" => float(water_dwell), "CoilWeights" => "metabolite PATREFSCAN",
+                           "coilcompression_to_numb_coils" => met_scan[:n_compressed_coils])
     write_water_reference(watref_path, weights, water, mixing, water_scan, 1.0; dwelltime=met_dwell, par)
     rm(path)
 end
