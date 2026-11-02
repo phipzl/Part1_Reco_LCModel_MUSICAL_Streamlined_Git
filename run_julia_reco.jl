@@ -20,7 +20,12 @@
 #                        in the layout MRSI_Reconstruction.m uses, so either pipeline
 #                        can read the other's coil weights; WaterReferenceCSI.Data is on
 #                        the metabolite grid, and channel_mixing_matrix is the channel
-#                        mixing both passes reconstruct with
+#                        mixing both passes reconstruct with. A water reference with
+#                        another slab (water_reference_grid.jl) leaves only the mixing
+#                        on the water pass, and WaterReferenceUncombined.mat beside it;
+#                        the metabolite pass combines that with its own coil weights,
+#                        writes weights and WaterReferenceCSI, and removes it. No
+#                        julia_csi_watref.raw then.
 # Written to tmp_dir:
 #   julia_recoinfo.m     CSI dimensions, read by julia_write_lcm_files on the MATLAB side
 
@@ -33,6 +38,7 @@ end
 using JSON
 using MAT
 using MRSI
+include(joinpath(@__DIR__, "water_reference_grid.jl"))
 
 """Parse a gradient delay string like "[12.56, 12.54, 10.08]" into complex microseconds.
 The complex form "[12.42+10.27im, ...]" is also accepted."""
@@ -75,8 +81,10 @@ combine_method_of(file) = MRSI.read_scan_info(file)[:ONLINE][:n_channels] == 1 ?
 
 """WaterReference.mat in the layout MRSI_Reconstruction.m writes. `WaterReferenceCSI`
 carries the coil-compression count the metabolite pass compares against its own, and the
-water signal as W1 reads it: on the metabolite grid, scaled by `gain_ratio`."""
-function write_water_reference(path, weights, water_csi, mixing, water_info, gain_ratio)
+water signal as W1 reads it: on the metabolite grid, scaled by `gain_ratio`. `dwelltime`
+(ns) is that of `water_csi`, `par` any further entries of its Par."""
+function write_water_reference(path, weights, water_csi, mixing, water_info, gain_ratio;
+                               dwelltime=water_info[:ONLINE][:dwelltime], par=Dict{String,Any}())
     println("Julia: writing $path")
     # RecoPar.Dwelltimes lets julia_write_lcm_files refuse a water reference LCModel
     # would read with the wrong bandwidth.
@@ -84,10 +92,10 @@ function write_water_reference(path, weights, water_csi, mixing, water_info, gai
         "weights" => Dict("Data" => weights),
         "WaterReferenceCSI" => Dict(
             "Data" => water_csi,
-            "Par" => Dict("coilcompression_to_numb_coils" => water_info[:n_compressed_coils],
-                          "AcquiredMatrix" => float.(collect(matrix_size(water_info))),
-                          "ReconstructionGainRatio" => gain_ratio),
-            "RecoPar" => Dict("Dwelltimes" => float(water_info[:ONLINE][:dwelltime]),
+            "Par" => merge(Dict{String,Any}("coilcompression_to_numb_coils" => water_info[:n_compressed_coils],
+                                            "AcquiredMatrix" => float.(collect(matrix_size(water_info))),
+                                            "ReconstructionGainRatio" => gain_ratio), par),
+            "RecoPar" => Dict("Dwelltimes" => float(dwelltime),
                               "vecSize" => float(size(water_csi, ndims(water_csi))))))
     isnothing(mixing) || (contents["channel_mixing_matrix"] = mixing)
     matwrite(path, contents)
@@ -114,10 +122,8 @@ matrix_size(scan_info) =
 const FOV_TOLERANCE_MM = 0.1
 const FOV_TOLERANCE_RAD = 1e-3
 
-"""Refuse a water reference that does not cover the metabolite scan's FOV. Zero-filling
-or cutting k-space moves data between matrices of one FOV only; another FOV or slab
-needs resampling in world coordinates, which this route does not do."""
-function check_same_fov(met_info, water_info, met_file, water_file)
+"""How the FOVs of two scans differ, as text; empty when they are the same."""
+function fov_differences(met_info, water_info)
     differences = String[]
     for key in (:fov_readout, :fov_phase, :fov_slice)
         abs(met_info[key] - water_info[key]) <= FOV_TOLERANCE_MM ||
@@ -131,10 +137,32 @@ function check_same_fov(met_info, water_info, met_file, water_file)
     rotation = abs(rem2pi(met_info[:in_plane_rotation] - water_info[:in_plane_rotation], RoundNearest))
     rotation <= FOV_TOLERANCE_RAD ||
         push!(differences, "in-plane rotations $(round(rad2deg(rotation); digits=3)) deg apart")
+    return differences
+end
+
+"""Refuse a water reference that does not cover the metabolite scan's FOV. Zero-filling
+or cutting k-space moves data between matrices of one FOV only; another slab takes the
+route of water_reference_grid.jl instead."""
+function check_same_fov(met_info, water_info, met_file, water_file)
+    differences = fov_differences(met_info, water_info)
     isempty(differences) && return
     error("The water reference $water_file does not share the FOV of $met_file: " *
           join(differences, ", ") * ". Its coil weights and water signal can only be moved " *
           "between matrices of the same FOV.")
+end
+
+"""How the water pass brings the water onto the metabolite grid: `:resize` in k-space
+when both scans share the FOV, `:metabolite_grid` when only the slab differs. Any other
+difference stays with `:resize`, which refuses it."""
+function water_route(met_info, water_info)
+    isempty(fov_differences(met_info, water_info)) && return :resize
+    slab_only = try
+        slab_offset_mm(met_info, water_info)
+        true
+    catch
+        false
+    end
+    return slab_only ? :metabolite_grid : :resize
 end
 
 """`data` on the water reference's grid, brought onto the metabolite scan's by
@@ -153,6 +181,40 @@ coil weights neither is normalised by its own reference scan, so the images of o
 density differ by this ratio, and W1 has to scale the water signal by it."""
 reconstruction_gain_ratio(met_info, water_info; kw...) =
     MRSI.reconstruction_gain(met_info[:ONLINE]; kw...) / MRSI.reconstruction_gain(water_info[:ONLINE]; kw...)
+
+"""The water pass for a water reference with another slab: the water uncombined on the
+metabolite grid (water_reference_grid.jl), mixed as the metabolite scan, in `path`. Then
+WaterReference.mat with the mixing alone, last, since its existence marks the pass done."""
+function write_uncombined_water(path, watref_path, water_scan, met_scan, mixing; do_hamming_filter, gradient_delay_us)
+    water, met = water_scan[:ONLINE], met_scan[:ONLINE]
+    offset = slab_offset_mm(met, water)
+    println("Julia: water slab $(water[:fov_slice]) mm in $(water[:n_part]) partitions, metabolite slab " *
+            "$(met[:fov_slice]) mm in $(met[:n_part]), centres $(round(offset; digits=3)) mm apart along the normal")
+    data = water_onto_metabolite_grid(water_scan, met_scan; n_points=water[:n_fid], channel_mixing_matrix=mixing,
+                                      do_hamming_filter, gradient_delay_us)
+    println("Julia: writing $path")
+    matwrite(path, Dict{String,Any}("Data" => data, "SlabOffset_mm" => offset))
+    println("Julia: writing $watref_path")
+    matwrite(watref_path, Dict{String,Any}("channel_mixing_matrix" => mixing))
+end
+
+"""The metabolite pass's half: the water left by `write_uncombined_water`, combined with
+the coil weights the metabolite CSI was combined with (ICE: its PATREFSCAN `patref` at
+point 5), so the receive field cancels and no gain is left between the two; resampled to
+the metabolite dwell time and written as WaterReferenceCSI with those weights."""
+function combine_uncombined_water(path, watref_path, patref, mixing, water_scan, met_scan)
+    stored = matread(path)
+    weights = MRSI.coil_combine_weights(patref)
+    water = MRSI.apply_coil_weights_and_combine(stored["Data"], weights)
+    water_dwell, met_dwell = water_scan[:ONLINE][:dwelltime], met_scan[:ONLINE][:dwelltime]
+    println("Julia: water reference combined with the metabolite scan's coil weights, resampled from " *
+            "$(water_dwell / 1e3) to $(met_dwell / 1e3) us")
+    water = resample_fid(water, water_dwell, met_dwell)
+    par = Dict{String,Any}("Route" => "metabolite_grid", "SlabOffset_mm" => stored["SlabOffset_mm"],
+                           "AcquiredDwelltime" => float(water_dwell), "CoilWeights" => "metabolite PATREFSCAN")
+    write_water_reference(watref_path, weights, water, mixing, water_scan, 1.0; dwelltime=met_dwell, par)
+    rm(path)
+end
 
 """What deep_crt_mrsi.combined_csi reads out of a CombinedCSI.mat.
 
@@ -377,6 +439,22 @@ isdefined(MRSI, :matlab_fov_shift_rotation) ||
 recon_kw = parity_mode == "matlab" ? (; common_kw..., matlab_kw...) :
                                      (; common_kw..., ice_kw...)
 
+# A water reference with another slab is reconstructed onto the metabolite grid here and
+# combined in the metabolite pass, with that scan's own weights.
+uncombined_path = joinpath(out_path, "WaterReferenceUncombined.mat")
+if is_water_ref
+    met_scan, water_scan = MRSI.read_scan_info(met_file), MRSI.read_scan_info(dat_file)
+    if water_route(met_scan[:ONLINE], water_scan[:ONLINE]) === :metabolite_grid
+        parity_mode == "ice" ||
+            error("The water reference $dat_file has another slab than $met_file; that route " *
+                  "reconstructs in ICE mode only.")
+        write_uncombined_water(uncombined_path, watref_path, water_scan, met_scan, shared_mixing;
+                               do_hamming_filter=hamming_flag, gradient_delay_us)
+        println("Julia: done.")
+        exit(0)
+    end
+end
+
 # The water reference supplies the coil weights for both scans, the way
 # MRSI_Reconstruction.m reuses the ones it stored in WaterReference.mat. The water
 # pass stores the weights its own CSI is combined with, at MATLAB's FID point, so
@@ -487,6 +565,13 @@ if is_water_ref
             "applied to the water signal")
     water_for_w1 = onto_metabolite_grid(csi_data, met_info, water_info, met_file, dat_file) .* Float32(gain_ratio)
     write_water_reference(watref_path, coil_weights, water_for_w1, shared_mixing, water_info, gain_ratio)
+end
+
+if !is_water_ref && isfile(uncombined_path)
+    isnothing(ice_patref) &&
+        error("$dat_file has no PATREFSCAN, whose coil weights combine the water reference on its grid.")
+    combine_uncombined_water(uncombined_path, watref_path, first(ice_patref), shared_mixing,
+                             MRSI.read_scan_info(water_file), MRSI.read_scan_info(dat_file))
 end
 
 if !is_water_ref && (n_files <= 1 || cur_avg == n_files)
