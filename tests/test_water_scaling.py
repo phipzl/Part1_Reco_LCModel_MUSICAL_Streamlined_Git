@@ -131,6 +131,43 @@ class VoigtEstimator(unittest.TestCase):
 
 
 class Inputs(unittest.TestCase):
+    def test_tissue_on_one_grid(self):
+        import nibabel as nib
+
+        with tempfile.TemporaryDirectory() as out:
+            paths = [os.path.join(out, f"{t}.nii.gz") for t in ("gm", "wm", "csf", "flipped")]
+            for path in paths[:3]:
+                nib.save(nib.Nifti1Image(np.zeros((4, 5, 6), np.float32), np.eye(4)), path)
+            nib.save(
+                nib.Nifti1Image(np.zeros((4, 5, 6), np.float32), np.diag([-1, 1, 1, 1])), paths[3]
+            )
+            pve, affine = water_scaling.load_tissue(paths[:3])
+            self.assertEqual(pve.shape, (3, 4, 5, 6))
+            with self.assertRaises(SystemExit):
+                water_scaling.load_tissue([paths[0], paths[1], paths[3]])
+
+    def test_water_psf(self):
+        met = dict(
+            matrix=[50, 50, 31],
+            fov_mm=[220.0, 220.0],
+            slab_thickness_mm=140.0,
+            slab_position=[0.0, 0.0, 0.0],
+        )
+        water = dict(met, matrix=[36, 36, 23])
+        weight = water_scaling.water_psf(met, water, (50, 50, 31), True)
+        self.assertEqual(int(weight.any(axis=(0, 1)).sum()), 23)
+        # Another slab (7T) or a larger matrix: the water was matched to the metabolite PSF
+        self.assertIsNone(
+            water_scaling.water_psf(met, dict(water, slab_thickness_mm=110.0), (50, 50, 31), True)
+        )
+        self.assertIsNone(
+            water_scaling.water_psf(met, dict(water, matrix=[64, 64, 23]), (50, 50, 31), True)
+        )
+        # A header without the phase FOV
+        self.assertIsNone(
+            water_scaling.water_psf(met, dict(water, fov_mm=[220.0, None]), (50, 50, 31), True)
+        )
+
     def test_single_slice_water(self):
         water = np.full((4, 4, 1, 32), 1 + 1j, np.complex64)
         for name, content in (
