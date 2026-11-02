@@ -167,6 +167,41 @@ class Inputs(unittest.TestCase):
         self.assertIsNone(
             water_scaling.water_psf(met, dict(water, fov_mm=[220.0, None]), (50, 50, 31), True)
         )
+        # Reconstructed on the metabolite grid: the metabolite PSF, whatever its header says
+        self.assertIsNone(
+            water_scaling.water_psf(met, water, (50, 50, 31), True, route="metabolite_grid")
+        )
+
+    def test_water_route(self):
+        import h5py
+
+        water = np.zeros((4, 4, 1, 32), np.complex64)
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "WaterReference.mat")
+            # MAT.jl's v7.3 layout: char arrays as uint16 with their MATLAB class
+            with h5py.File(path, "w") as f:
+                route = f.create_dataset(
+                    "WaterReferenceCSI/Par/Route",
+                    data=np.array([[ord(c)] for c in "metabolite_grid"], np.uint16).T[..., None],
+                )
+                route.attrs["MATLAB_class"] = np.bytes_("char")
+            self.assertEqual(water_scaling.water_route(out), "metabolite_grid")
+            with h5py.File(path, "w") as f:
+                f.create_dataset("WaterReferenceCSI/Par/AcquiredMatrix", data=[36.0, 36.0, 23.0])
+            self.assertIsNone(water_scaling.water_route(out))
+            for par, expected in (
+                ({"Route": "metabolite_grid"}, "metabolite_grid"),
+                ({"AcquiredMatrix": [36, 36, 23]}, None),
+                (None, None),
+            ):
+                with self.subTest(par=par):
+                    content = (
+                        {"WaterReferenceOnCSIGrid": water}
+                        if par is None
+                        else {"WaterReferenceCSI": {"Data": water, "Par": par}}
+                    )
+                    scipy.io.savemat(path, content)
+                    self.assertEqual(water_scaling.water_route(out), expected)
 
     def test_single_slice_water(self):
         water = np.full((4, 4, 1, 32), 1 + 1j, np.complex64)

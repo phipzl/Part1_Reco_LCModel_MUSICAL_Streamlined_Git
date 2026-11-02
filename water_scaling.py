@@ -115,6 +115,23 @@ def load_water(out_path):
     return np.asarray(water, np.complex64), source, first_sample
 
 
+def water_route(out_path):
+    """How the Julia water pass brought the water onto the metabolite grid
+    (WaterReferenceCSI Par.Route, "metabolite_grid" for another slab), else None."""
+    path = os.path.join(out_path, "WaterReference.mat")
+    if h5py.is_hdf5(path):
+        with h5py.File(path, "r") as f:
+            route = f.get("WaterReferenceCSI/Par/Route")
+            return None if route is None else "".join(map(chr, np.ravel(route[()])))
+    names = [name for name, _, _ in scipy.io.whosmat(path)]
+    if "WaterReferenceCSI" not in names:
+        return None
+    par = scipy.io.loadmat(path, variable_names=["WaterReferenceCSI"])["WaterReferenceCSI"]
+    if "Par" not in par.dtype.names or "Route" not in par["Par"][0, 0].dtype.names:
+        return None
+    return str(np.ravel(par["Par"][0, 0]["Route"][0, 0])[0])
+
+
 def recopar(combined):
     """Dwell time (s), Larmor frequency (Hz) and point count of the reconstruction."""
     with h5py.File(combined, "r") as f:
@@ -158,9 +175,12 @@ def load_tissue(paths):
     return pve, images[0].affine
 
 
-def water_psf(met, water, shape, hamming):
+def water_psf(met, water, shape, hamming, route=None):
     """The water scan's k-space weight on the metabolite grid when it was zero-filled onto it
-    (same FOV, matrix not larger), else None: the water was matched to the metabolite PSF."""
+    (same FOV, matrix not larger), else None: the water was matched to the metabolite PSF.
+    route "metabolite_grid" (water_route): reconstructed with the metabolite PSF, so None."""
+    if route == "metabolite_grid":
+        return None
     same_fov = (
         met["matrix"] is not None
         and water["matrix"] is not None
@@ -177,12 +197,22 @@ def water_psf(met, water, shape, hamming):
 
 
 def concentration_correction(
-    template, mask, tissue, b1, met_file, water_file, edge_margin_mm, min_brain=0.9, hamming=True
+    template,
+    mask,
+    tissue,
+    b1,
+    met_file,
+    water_file,
+    edge_margin_mm,
+    min_brain=0.9,
+    hamming=True,
+    route=None,
 ):
     """{group: factor} from institutional units to mmol/kg tissue water (concentration_model),
     the maps it rests on and its record. Voxels outside the inner partitions of the VOI, with
     less than min_brain brain tissue in the excited volume of either signal, or no B1, get 0.
-    hamming: the reconstruction's in-plane Hamming (-h); MRSI.jl applies its kz window always."""
+    hamming: the reconstruction's in-plane Hamming (-h); MRSI.jl applies its kz window always.
+    route: the water pass's (water_route)."""
     shape, csi_affine = template.shape[:3], template.affine
     met, water = model.read_protocol(met_file), model.read_protocol(water_file)
     pve, pve_affine = load_tissue(tissue)
@@ -192,7 +222,7 @@ def concentration_correction(
     amounts, brain, excited = model.tissue_on_grid(
         pve, pve_affine, csi_affine, shape, weight, model.voi_profile(met, shape[2])
     )
-    weight_water = water_psf(met, water, shape, hamming)
+    weight_water = water_psf(met, water, shape, hamming, route)
     if weight_water is None:
         amounts_water, brain_water = amounts, brain
     else:
@@ -264,9 +294,14 @@ def concentration_correction(
             "hamming_in_plane": bool(hamming),
             "metabolite_acquired_matrix": met["matrix"],
             "water_psf": (
-                "the metabolite's (matched)"
-                if weight_water is None
-                else f"its own, acquired {water['matrix']} zero-filled onto {list(shape)}"
+                f"its own, acquired {water['matrix']} zero-filled onto {list(shape)}"
+                if weight_water is not None
+                else (
+                    "the metabolite's: reconstructed on the metabolite grid (route "
+                    "metabolite_grid)"
+                    if route == "metabolite_grid"
+                    else "the metabolite's (matched)"
+                )
             ),
         },
         "valid": {
@@ -390,6 +425,7 @@ def main(tmp_dir, tissue=None, b1=None, edge_margin_mm=EDGE_MARGIN_MM):
             water_file,
             edge_margin_mm,
             hamming=par.get("hamming_flag", 0) == 1,
+            route=water_route(out_path),
         )
         for name, volume in correction_maps.items():
             write_map(water_dir, f"{name}_map", volume, template)
