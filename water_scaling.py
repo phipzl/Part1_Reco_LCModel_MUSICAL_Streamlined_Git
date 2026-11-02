@@ -144,36 +144,82 @@ def load_b1(path):
     )
 
 
+def load_tissue(paths):
+    """GM, WM, CSF partial volumes (3, ...) and their affine; all three on one grid."""
+    images = [nib.load(path) for path in paths]
+    if len(images) != 3:
+        sys.exit(f"ERROR: --tissue needs GM,WM,CSF, got {len(images)} files.")
+    for path, image in zip(paths[1:], images[1:]):
+        if image.shape[:3] != images[0].shape[:3] or not np.allclose(
+            image.affine, images[0].affine, atol=1e-3
+        ):
+            sys.exit(f"ERROR: {path} is not on the grid of {paths[0]}.")
+    pve = np.stack([np.asarray(image.dataobj, float).reshape(image.shape[:3]) for image in images])
+    return pve, images[0].affine
+
+
+def water_psf(met, water, shape, hamming):
+    """The water scan's k-space weight on the metabolite grid when it was zero-filled onto it
+    (same FOV, matrix not larger), else None: the water was matched to the metabolite PSF."""
+    same_fov = (
+        met["matrix"] is not None
+        and water["matrix"] is not None
+        and None not in met["fov_mm"] + water["fov_mm"]
+        and np.allclose(met["fov_mm"], water["fov_mm"], atol=0.1)
+        and abs(met["slab_thickness_mm"] - water["slab_thickness_mm"]) < 0.1
+        and np.allclose(met["slab_position"], water["slab_position"], atol=0.1)
+    )
+    if not same_fov or any(a > n for a, n in zip(water["matrix"], shape)):
+        return None
+    return model.mrsi_kspace_weight(
+        shape, hamming=hamming, hamming_z=True, acquired=water["matrix"]
+    )
+
+
 def concentration_correction(
-    template, mask, tissue, b1, met_file, water_file, edge_margin_mm, min_brain=0.9
+    template, mask, tissue, b1, met_file, water_file, edge_margin_mm, min_brain=0.9, hamming=True
 ):
     """{group: factor} from institutional units to mmol/kg tissue water (concentration_model),
-    the maps it rests on and its record. Voxels outside the inner partitions of the VOI,
-    with less than min_brain brain tissue (GM + WM + CSF of the excited volume) or no B1 get 0."""
+    the maps it rests on and its record. Voxels outside the inner partitions of the VOI, with
+    less than min_brain brain tissue in the excited volume of either signal, or no B1, get 0.
+    hamming: the reconstruction's in-plane Hamming (-h); MRSI.jl applies its kz window always."""
     shape, csi_affine = template.shape[:3], template.affine
     met, water = model.read_protocol(met_file), model.read_protocol(water_file)
-    images = [nib.load(path) for path in tissue]
-    pve = np.stack([np.asarray(image.dataobj, float).reshape(image.shape[:3]) for image in images])
-    profile = model.voi_profile(met, shape[2])
-    averaged = model.psf_average(
-        np.concatenate([pve, np.ones((1,) + pve.shape[1:])]),
-        images[0].affine,
-        csi_affine,
-        shape,
-        profile=profile,
+    pve, pve_affine = load_tissue(tissue)
+    weight = model.mrsi_kspace_weight(
+        shape, hamming=hamming, hamming_z=True, acquired=met["matrix"]
     )
-    coverage = averaged[3]
+    amounts, brain, excited = model.tissue_on_grid(
+        pve, pve_affine, csi_affine, shape, weight, model.voi_profile(met, shape[2])
+    )
+    weight_water = water_psf(met, water, shape, hamming)
+    if weight_water is None:
+        amounts_water, brain_water = amounts, brain
+    else:
+        amounts_water, brain_water, _ = model.tissue_on_grid(
+            pve, pve_affine, csi_affine, shape, weight_water, model.voi_profile(water, shape[2])
+        )
+    total = amounts.sum(axis=0)
     with np.errstate(invalid="ignore", divide="ignore"):
-        volume = np.clip(np.where(coverage > 0.05, averaged[:3] / coverage, 0), 0, 1)
-    brain = volume.sum(axis=0)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        volume = np.where(brain > 0, volume / np.where(brain > 0, brain, 1), 0)
+        volume = np.where(total > 0, amounts / np.where(total > 0, total, 1), 0)
     b1_map, b1_affine, b1_record = load_b1(b1)
     b1_grid, b1_support = model.b1_on_grid(b1_map, b1_affine, csi_affine, shape)
     inner = model.inner_partitions(met, shape[2], edge_margin_mm)
-    valid = mask & inner[None, None, :] & (brain >= min_brain) & (b1_support > 0.5)
+    valid = (
+        mask
+        & inner[None, None, :]
+        & (brain >= min_brain)
+        & (brain_water >= min_brain)
+        & (amounts[0] + amounts[1] > 0)
+        & (b1_support > 0.5)
+    )
     factors = model.correction_factors(
-        volume, b1_grid, met, water, b1_record["reference_amplitude_v"]
+        amounts,
+        b1_grid,
+        met,
+        water,
+        b1_record["reference_amplitude_v"],
+        volume_water=None if weight_water is None else amounts_water,
     )
     factors = {
         g: np.where(valid & np.isfinite(f), f, 0).astype(np.float32) for g, f in factors.items()
@@ -183,7 +229,8 @@ def concentration_correction(
         "WM_fraction": volume[1],
         "CSF_fraction": volume[2],
         "brain_fraction": brain,
-        "excited_fraction": coverage,
+        "brain_fraction_water": brain_water,
+        "excited_fraction": excited,
         "B1_relative": b1_grid,
         "flip_deg_metabolite": np.degrees(
             model.actual_flip(met, b1_grid, b1_record["reference_amplitude_v"])
@@ -197,8 +244,10 @@ def concentration_correction(
     field = model.field_of(met["b0_t"])
     record = {
         "unit": "mmol/kg tissue water (molal)",
-        "formula": "[M] = c_iu * 55510/55556 * sum_t f_t R_W,t / (f_GM R_M,GM + f_WM R_M,WM), "
-        "f_t = v_t d_t / sum v d, R = sin a (1 - E1) / (1 - cos a E1) * exp(-TE / T2), "
+        "formula": "[M] = c_iu * 55510/55556 * sum_t V^w_t d_t R_W,t / sum_GM,WM V_t d_t R_M,t, "
+        "V and V^w the tissue amounts the metabolite and the water signal see (with one PSF "
+        "this is sum_t f_t R_W,t / (f_GM R_M,GM + f_WM R_M,WM), f_t = v_t d_t / sum v d), "
+        "R = sin a (1 - E1) / (1 - cos a E1) * exp(-TE / T2), "
         "a = nominal flip * B1 * reference amplitude / B1 map's",
         "method": "Gasparovic 2006 with CSF correction, as Near 2021 eq. 4 and 5",
         "protons": "in C_fit: each fitter's basis carries its metabolites' protons, the water 2",
@@ -210,8 +259,15 @@ def concentration_correction(
             "files": list(tissue),
             "order": "GM, WM, CSF",
             "grid": "partial volumes x the VOI box along the partitions, filtered with the "
-            "reconstruction's k-space weight (disk per partition, Hamming in-plane and in kz), "
-            "divided by the filtered box",
+            "reconstruction's k-space weight (disk per partition, Hamming in-plane as -h, "
+            "Hamming in kz); fractions of the brain for the maps, amounts for the factors",
+            "hamming_in_plane": bool(hamming),
+            "metabolite_acquired_matrix": met["matrix"],
+            "water_psf": (
+                "the metabolite's (matched)"
+                if weight_water is None
+                else f"its own, acquired {water['matrix']} zero-filled onto {list(shape)}"
+            ),
         },
         "valid": {
             "edge_margin_mm": edge_margin_mm,
@@ -326,7 +382,14 @@ def main(tmp_dir, tissue=None, b1=None, edge_margin_mm=EDGE_MARGIN_MM):
         met_file = met_file[0] if isinstance(met_file, list) else met_file
         water_file = par.get("WaterReference_MethodAndFile", "").split(",")[-1].strip()
         factors, correction_maps, correction = concentration_correction(
-            template, mask, tissue, b1, met_file, water_file, edge_margin_mm
+            template,
+            mask,
+            tissue,
+            b1,
+            met_file,
+            water_file,
+            edge_margin_mm,
+            hamming=par.get("hamming_flag", 0) == 1,
         )
         for name, volume in correction_maps.items():
             write_map(water_dir, f"{name}_map", volume, template)

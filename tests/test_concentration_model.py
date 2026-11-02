@@ -81,11 +81,13 @@ class MolalFactor(unittest.TestCase):
 
     def test_forward_model(self):
         """Known molal concentrations through signal formation and back, per voxel: tissue
-        mixtures with CSF, B1 0.7-1.3, metabolite and water scans with other TR, flip and
+        mixtures with CSF, the water signal seeing another mixture than the metabolite signal
+        (its own PSF), B1 0.7-1.3, metabolite and water scans with other TR, flip and
         transmitter reference, as at 7T."""
         rng = np.random.default_rng(0)
         n = 500
-        volume = rng.dirichlet([3, 3, 1], n).T
+        volume = 0.98 * rng.dirichlet([3, 3, 1], n).T
+        volume_water = 0.95 * rng.dirichlet([3, 3, 1], n).T
         b1 = rng.uniform(0.7, 1.3, n)
         reference_b1 = 300.0
         for field, met, water in (
@@ -106,13 +108,15 @@ class MolalFactor(unittest.TestCase):
             s_water = sum(
                 2
                 * water_molal
-                * volume[k]
+                * volume_water[k]
                 * content[t]
                 * steady_state_by_pulses(a_water, water["tr_s"], table["water_T1"][t])
                 * np.exp(-water["te_s"] / table["water_T2"][t])
                 for k, t in enumerate(model.TISSUES)
             )
-            factors = model.correction_factors(volume, b1, met, water, reference_b1, field=field)
+            factors = model.correction_factors(
+                volume, b1, met, water, reference_b1, field=field, volume_water=volume_water
+            )
             for group in model.GROUPS:
                 truth = rng.uniform(1, 12)
                 s_met = sum(
@@ -127,6 +131,24 @@ class MolalFactor(unittest.TestCase):
                 c_iu = model.IU_WATER_MM * 2 / protons * s_met / s_water
                 np.testing.assert_allclose(
                     c_iu * factors[group], truth, rtol=1e-6, err_msg=f"{field} {group}"
+                )
+
+    def test_one_psf_is_the_mole_fraction_form(self):
+        volume = np.random.default_rng(1).dirichlet([3, 3, 1], 50).T
+        r_water, r_met = np.reshape([0.4, 0.3, 0.2], (3, 1)), [0.5, 0.25]
+        f = model.water_mole_fractions(volume, self.content)
+        expected = (
+            model.H2O_MOLAL
+            / model.IU_WATER_MM
+            * (f * r_water).sum(0)
+            / (f[0] * r_met[0] + f[1] * r_met[1])
+        )
+        for amounts in (volume, 0.9 * volume):
+            for volume_water in (None, amounts):
+                np.testing.assert_allclose(
+                    model.molal_factor(amounts, r_water, r_met, self.content, volume_water),
+                    expected,
+                    rtol=1e-12,
                 )
 
     def test_bounds_of_the_budget(self):
@@ -179,6 +201,38 @@ class Grid(unittest.TestCase):
         # The central partition's six circles reach 6 / 12 cycles per acquired voxel
         kx = np.fft.fftfreq(20, 1 / 20)
         self.assertEqual(np.abs(kx[np.flatnonzero(weight[:, 0, 0])]).max(), 5)
+
+    def test_kspace_weight_windows(self):
+        # -h off: no in-plane Hamming, the kz window stays
+        weight = model.mrsi_kspace_weight(self.shape, hamming=False, hamming_z=True)
+        central = weight[:, :, 0][weight[:, :, 0] > 0]
+        np.testing.assert_allclose(central, 1)
+        self.assertLess(weight[0, 0, 1], 1)
+        # A truncated grid keeps its own partitions only, nothing wraps around
+        truncated = model.mrsi_kspace_weight(self.shape, acquired=(24, 24, 15))
+        self.assertEqual(int(truncated.any(axis=(0, 1)).sum()), self.shape[2])
+        self.assertTrue(np.all(truncated <= 1))
+
+    def test_tissue_on_grid_segmentation_fov(self):
+        # GM everywhere, but segmented only for x >= 0: the rest counts as no brain
+        t1 = np.diag([1.0, 1.0, 1.0, 1.0])
+        t1[:3, 3] = [0, -60, -90]
+        gm = np.ones((60, 120, 180))
+        pve = np.stack([gm, 0 * gm, 0 * gm])
+        weight = model.mrsi_kspace_weight(self.shape)
+        amounts, brain, excited = model.tissue_on_grid(
+            pve, t1, self.csi, self.shape, weight, lambda z: np.ones_like(z)
+        )
+        np.testing.assert_allclose(excited, 1, atol=1e-9)
+        self.assertGreater(brain[15, 10, 5], 0.98)  # x = 22 mm
+        self.assertLess(brain[3, 10, 5], 0.02)  # x = -31 mm
+        np.testing.assert_allclose(amounts[0], brain, atol=1e-9)
+        # Without any window the PSF rings at the edge; the amounts stay non-negative
+        flat = model.mrsi_kspace_weight(self.shape, hamming=False, hamming_z=False)
+        amounts, _, _ = model.tissue_on_grid(
+            pve, t1, self.csi, self.shape, flat, lambda z: np.ones_like(z)
+        )
+        self.assertGreaterEqual(amounts.min(), 0)
 
     def test_uniform_and_edge(self):
         uniform = np.ones((120, 120, 180))
@@ -254,7 +308,9 @@ class Headers(unittest.TestCase):
     def test_real_3t(self):
         met = model.read_protocol(os.path.join(MRSI_3T_HEADER_DIR, MET_DAT))
         water = model.read_protocol(os.path.join(MRSI_3T_HEADER_DIR, WATER_DAT))
-        for p, partitions in ((met, 31), (water, 23)):
+        for p, partitions, base in ((met, 31, 50), (water, 23, 36)):
+            self.assertEqual(p["matrix"], [base, base, partitions])
+            self.assertEqual(p["fov_mm"], [220.0, 220.0])
             self.assertAlmostEqual(p["tr_s"], 0.45)
             self.assertEqual(p["flip_deg"], 50.0)
             self.assertAlmostEqual(p["te_s"], 1e-3)
@@ -281,6 +337,28 @@ class Headers(unittest.TestCase):
         np.testing.assert_allclose(np.linalg.norm(affine[:3, :3], axis=0), [4, 4, 6], atol=0.01)
         inside = b1[(b1 > 0.3) & (b1 < 2)]
         self.assertTrue(0.85 < np.median(inside) < 1.05)
+
+
+class DicomRescale(unittest.TestCase):
+    def test_per_frame_shared_and_top_level(self):
+        from pydicom.dataset import Dataset
+
+        def group(slope, intercept):
+            g, t = Dataset(), Dataset()
+            t.RescaleSlope, t.RescaleIntercept = slope, intercept
+            g.PixelValueTransformationSequence = [t]
+            return g
+
+        ds = Dataset()
+        ds.PerFrameFunctionalGroupsSequence = [group(1, 0), group(2, -5)]
+        self.assertEqual(model.frame_rescale(ds, 1), (2.0, -5.0))
+        ds = Dataset()
+        ds.PerFrameFunctionalGroupsSequence = [Dataset(), Dataset()]
+        ds.SharedFunctionalGroupsSequence = [group(3, 1)]
+        self.assertEqual(model.frame_rescale(ds, 1), (3.0, 1.0))
+        ds = Dataset()
+        ds.PerFrameFunctionalGroupsSequence = [Dataset()]
+        self.assertEqual(model.frame_rescale(ds, 0), (1.0, 0.0))
 
 
 class Names(unittest.TestCase):

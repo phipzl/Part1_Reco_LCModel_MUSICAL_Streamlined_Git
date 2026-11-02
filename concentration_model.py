@@ -370,6 +370,13 @@ def read_protocol(path):
     def vector(prefix):
         return [ascconv_value(text, f"{prefix}.d{a}", 0.0) for a in ("Sag", "Cor", "Tra")]
 
+    def optional(key):
+        try:
+            return ascconv_value(text, key)
+        except KeyError:
+            return None
+
+    matrix = [optional(f"sKSpace.{k}") for k in ("lBaseResolution", "lPhaseEncodingLines")]
     return dict(
         file=str(path),
         tr_s=ascconv_value(text, "alTR[0]") * 1e-6,
@@ -381,6 +388,13 @@ def read_protocol(path):
         slab_thickness_mm=ascconv_value(text, "sSliceArray.asSlice[0].dThickness"),
         voi_thickness_mm=ascconv_value(text, "sSpecPara.sVoI.dThickness"),
         partitions=int(ascconv_value(text, "sKSpace.lPartitions")),
+        # Acquired matrix (read, phase, partitions) and in-plane FOV; None when not in the header
+        matrix=(
+            None
+            if None in matrix
+            else [int(v) for v in matrix] + [int(ascconv_value(text, "sKSpace.lPartitions"))]
+        ),
+        fov_mm=[optional(f"sSliceArray.asSlice[0].d{k}FOV") for k in ("Readout", "Phase")],
         slab_position=vector("sSliceArray.asSlice[0].sPosition"),
         slab_normal=vector("sSliceArray.asSlice[0].sNormal"),
         voi_position=vector("sSpecPara.sVoI.sPosition"),
@@ -411,14 +425,18 @@ def water_mole_fractions(volume, content):
         return np.where(total > 0, weighted / np.where(total > 0, total, 1), np.nan)
 
 
-def molal_factor(volume, r_water, r_met, content):
-    """[M] / c_iu per voxel (Near 2021 eq. 4).
+def molal_factor(volume, r_water, r_met, content, volume_water=None):
+    """[M] / c_iu per voxel: 55510 / 55556 * sum_t V^w_t d_t R_W,t / sum_GM,WM V_t d_t R_M,t.
 
-    r_water (3, ...) is GM, WM, CSF; r_met (2, ...) is GM, WM.
+    volume (3, ...) GM, WM, CSF as the metabolite signal sees them, volume_water as the water
+    signal does (default the same; then this is Near 2021 eq. 4 with the water mole fractions
+    of eq. 5). r_water (3, ...) is GM, WM, CSF; r_met (2, ...) is GM, WM.
     """
-    f = water_mole_fractions(volume, content)
-    numerator = (f * np.asarray(r_water)).sum(axis=0)
-    denominator = f[0] * r_met[0] + f[1] * r_met[1]
+    d = np.reshape([content[t] for t in TISSUES], (3,) + (1,) * (np.ndim(volume) - 1))
+    water_side = np.asarray(volume if volume_water is None else volume_water, float) * d
+    met_side = np.asarray(volume, float) * d
+    numerator = (water_side * np.asarray(r_water)).sum(axis=0)
+    denominator = met_side[0] * r_met[0] + met_side[1] * r_met[1]
     with np.errstate(invalid="ignore", divide="ignore"):
         return H2O_MOLAL / IU_WATER_MM * numerator / denominator
 
@@ -430,10 +448,13 @@ def actual_flip(protocol, b1_relative, b1_reference_v):
     return np.deg2rad(protocol["flip_deg"]) * np.asarray(b1_relative) * scale
 
 
-def correction_factors(volume, b1_relative, met, water, b1_reference_v, field=None, which=None):
-    """{group: [M] / c_iu} maps. volume (3, ...) GM, WM, CSF fractions; met and water the
-    read_protocol of the two scans. which = {(table, ..., tissue): "low"/"high"} picks a
-    constant's bound instead of its value (uncertainty budget)."""
+def correction_factors(
+    volume, b1_relative, met, water, b1_reference_v, field=None, which=None, volume_water=None
+):
+    """{group: [M] / c_iu} maps. volume (3, ...) GM, WM, CSF through the metabolite scan's PSF,
+    volume_water through the water scan's (default the same); met and water the read_protocol
+    of the two scans. which = {(table, ..., tissue): "low"/"high"} picks a constant's bound
+    instead of its value (uncertainty budget)."""
     field = field or field_of(met["b0_t"])
     table = CONSTANTS[field]
 
@@ -464,7 +485,7 @@ def correction_factors(volume, b1_relative, met, water, b1_reference_v, field=No
                 for t in ("GM", "WM")
             ]
         )
-        factors[group] = molal_factor(volume, r_water, r_met, content)
+        factors[group] = molal_factor(volume, r_water, r_met, content, volume_water)
     return factors
 
 
@@ -484,13 +505,17 @@ def group_of(name):
 # Grids
 
 
-def mrsi_kspace_weight(shape, circles_per_partition=None, hamming=True, acquired=None):
+def mrsi_kspace_weight(
+    shape, circles_per_partition=None, hamming=True, acquired=None, hamming_z=None
+):
     """The k-space weighting of the CRT reconstruction on the Cartesian grid of `shape`
     (FFT order): the disk each partition's circles cover (circle i at radius (i - 1/2) / N,
-    its annulus to i / N), the in-plane Hamming of the radius and the Hamming along kz, as
-    MRSI.jl applies them in ICE mode. `acquired`: the matrix of a scan of the same FOV that
-    was zero-filled onto `shape`, whose (smaller) weighting is then returned."""
-    acquired = acquired or shape
+    its annulus to i / N), the in-plane Hamming of the radius (`hamming`) and the Hamming
+    along kz (`hamming_z`, default `hamming`), as MRSI.jl applies them in ICE mode.
+    `acquired`: the matrix of a scan of the same FOV that was zero-filled or truncated onto
+    `shape`; frequencies outside the grid are dropped."""
+    acquired = tuple(acquired or shape)
+    hamming_z = hamming if hamming_z is None else hamming_z
     nx, ny, nz = acquired
     n_circles = nx // 2
     if circles_per_partition is None:
@@ -510,11 +535,13 @@ def mrsi_kspace_weight(shape, circles_per_partition=None, hamming=True, acquired
     in_plane = 0.54 + 0.46 * np.cos(2 * np.pi * radius) if hamming else np.ones_like(radius)
     z_window = (
         0.54 + 0.46 * np.cos(2 * np.pi * np.linspace(-0.5, 0.5, nz))
-        if hamming and nz > 1
+        if hamming_z and nz > 1
         else np.ones(nz)
     )
     weight = np.zeros(shape)
     for index, p in enumerate(range(-(nz // 2), nz - nz // 2)):
+        if not -(shape[2] // 2) <= p < shape[2] - shape[2] // 2:
+            continue
         limit = circles_per_partition[index] / nx
         weight[:, :, p % shape[2]] = np.where(radius < limit, in_plane, 0) * z_window[index]
     return weight / weight[0, 0, 0]
@@ -550,6 +577,25 @@ def psf_average(
     return np.stack(out)
 
 
+def tissue_on_grid(pve, affine, csi_affine, csi_shape, weight, profile):
+    """GM, WM, CSF (3, ...) as one scan's signal sees them: the partial volumes times the VOI
+    `profile` through the k-space `weight` (unit gain), at the CSI voxel centres; also the
+    excited share of each voxel (the profile alone through the same PSF) and the brain share
+    of the excited volume. Tissue outside the segmentation's FOV counts as no brain."""
+    # Clipped: the PSF's ringing must not give negative tissue near boundaries
+    amounts = np.clip(
+        psf_average(pve, affine, csi_affine, csi_shape, weight=weight, profile=profile), 0, None
+    )
+    # Ones on the CSI grid padded by a voxel, so the excitation does not depend on any FOV
+    padded = np.array(csi_affine, float)
+    padded[:3, 3] = csi_affine[:3, 3] - csi_affine[:3, :3].sum(axis=1)
+    ones = np.ones((1,) + tuple(n + 2 for n in csi_shape))
+    excited = psf_average(ones, padded, csi_affine, csi_shape, weight=weight, profile=profile)[0]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        brain = np.where(excited > 0.05, amounts.sum(axis=0) / excited, 0)
+    return amounts, brain, excited
+
+
 def partition_offsets_mm(protocol, n_partitions):
     """Distance of each partition centre from the VOI centre along the slab normal (mm)."""
     thickness = protocol["slab_thickness_mm"] / n_partitions
@@ -581,6 +627,18 @@ def inner_partitions(protocol, n_partitions, margin_mm):
 # B1 maps
 
 
+def frame_rescale(ds, i):
+    """Rescale slope and intercept of frame i of an enhanced DICOM: its own functional group,
+    else the shared one, else the top-level attributes, else (1, 0)."""
+    groups = [ds.PerFrameFunctionalGroupsSequence[i]]
+    groups += list(ds.get("SharedFunctionalGroupsSequence") or [])[:1]
+    for group in groups:
+        transform = group.get("PixelValueTransformationSequence")
+        if transform:
+            return float(transform[0].RescaleSlope), float(transform[0].RescaleIntercept)
+    return float(ds.get("RescaleSlope", 1.0)), float(ds.get("RescaleIntercept", 0.0))
+
+
 def siemens_b1_map(path):
     """Relative B1 of a Siemens tfl_b1map flip angle map (enhanced DICOM): the pixel is ten
     times the flip angle the preparation reached, its nominal angle the FlipAngle of the
@@ -602,10 +660,10 @@ def siemens_b1_map(path):
     measures = (frames[0].get("PixelMeasuresSequence") or shared.PixelMeasuresSequence)[0]
     row_spacing, col_spacing = (float(v) for v in measures.PixelSpacing)
     positions = np.array([f.PlanePositionSequence[0].ImagePositionPatient for f in frames], float)
-    pixels = ds.pixel_array.astype(float)  # frames, rows, columns
-    slope = float(frames[0].PixelValueTransformationSequence[0].RescaleSlope)
-    intercept = float(frames[0].PixelValueTransformationSequence[0].RescaleIntercept)
-    pixels = pixels * slope + intercept
+    pixels = ds.pixel_array.astype(float).reshape(len(frames), ds.Rows, ds.Columns)
+    for i in range(len(frames)):
+        slope, intercept = frame_rescale(ds, i)
+        pixels[i] = pixels[i] * slope + intercept
     normal = np.cross(orientation[:3], orientation[3:])
     order = np.argsort(positions @ normal)
     positions, pixels = positions[order], pixels[order]
