@@ -328,7 +328,7 @@ def main(tmp_dir, tissue=None, b1=None, edge_margin_mm=EDGE_MARGIN_MM):
             template, mask, tissue, b1, met_file, water_file, edge_margin_mm
         )
         for name, volume in correction_maps.items():
-            write_map(water_dir, name, volume, template)
+            write_map(water_dir, f"{name}_map", volume, template)
         inner = correction["valid"]["inner_partitions"]
         print(
             "water_scaling: mmol/kg tissue water on "
