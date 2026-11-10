@@ -389,7 +389,7 @@ optional:
 -R  [SliceAliasingPattern]
 -s  [NonCartTrajFile_path]  Use this option if CSI Data is raw NonCartesian data and pass over trajectory file/path in .m or .mat file (.m file for theoretical \"calculated\" gradients, .mat file for \"measured\" trajectory). For some trajectories (CRT, Antoines rosette/eccentric, egg-trajectory) this is not necessary, as the read-in functions can automatically calculate the trajectory based on the header information. If a measured trajectory is provided with a mat file, it may contain a variable StartingPointAfterLaunchTrack which needs to be a cell with one entry for each angular interleaf, each containing one number saying how many ADC points should be omitted at the beginning in case the measured trajectory was calculated only from a later time point. The file must contain a variable kSpaceTrajectory with subfield .GM (GradientMoment) being a cell with one entry for each angular interleaf, each being a matrix of size [2 ADCPtsPerCircle].
 -S  [threads] [mmap]        Use the Julia reconstruction version (less RAM usage, different reconstruction algorithm). [threads=auto] can be auto or a number. [mmap=false] can be \"true\", \"false\" or a path. [threads] may be followed by \",matlab\" to reproduce MRSI_Reconstruction.m instead of the online ICE route.
--t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If a minc or NIfTI file is given instead of folder, it is treated as the magnitude file.
+-t  [T1 images]             Format: DICOM. Folder of 3d T1-weighted acquisition containing DICOM files. Used for creating mask and for visual purposes. If a minc or NIfTI file is given instead of folder, it is treated as the magnitude file. A WARNING is printed if it is in another frame of reference than the csi file (patient re-landmarked).
 -T  \"[TruncateFactor ZerofillFactor FillToOrig]\"  Interpolation of FID data in time domain using truncation and zerofilling. TruncateFactor determines how much of the orignal data is left after truncation and must be a value from 0 to 1. ZerofillFactor determines how far the zerofilling happens (relative to the truncated data) and must be larger >1. If FillToOrig is 1, the data is truncated to TruncateFactor and afterwards filled up to the original length (ZerofillFactor is irrelevant in this case). Example: To truncate down to 50 percent and then zerofill to 2x the original size, use [0.5 4 0].
 -v  [VC image]              Format: DAT or DICOM. Image of volume or body coil file. Used for sensmap method or for creating mask.
 -w  [Water Reference]       Format: DAT or DICOM. LCModel 'Do Water Scaling' or separate water quantification (Water maps are created). The same scan as -c [csi file], but without water suppression.
@@ -437,6 +437,16 @@ if [[ $mask_flag -eq 1 ]]; then
             fi
             ;;
     esac
+fi
+
+# Warn when the -t image and the MRSI are in different frames of reference (never stops the run)
+if [[ $T1w_flag -eq 1 && $csi_flag -eq 1 ]]; then
+    FrameCheckPython=$(command -v python3 || command -v python)
+    if [[ -n $FrameCheckPython ]]; then
+        "$FrameCheckPython" ./check_t1_frame.py "$T1w_path" "$csi_path" || true
+    else
+        echo "T1 frame of reference not checked: no python3 or python found"
+    fi
 fi
 
 ###0. GH: measure time elapsed:
