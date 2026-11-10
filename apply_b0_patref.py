@@ -45,7 +45,8 @@ def main(tmp_dir):
 
     from deep_crt_mrsi.b0_correction import B0_correct_fids, calculate_B0
 
-    b0 = calculate_B0(reference, dwelltime)
+    # The mean phase step between consecutive points, over all acquired points.
+    b0 = calculate_B0(reference, dwelltime, estimator="lag1")
     in_mask = b0[mask]
     print(f"apply_b0_patref: B0 map median {np.median(in_mask):.2f} Hz, "
           f"5-95% {np.percentile(in_mask, 5):.1f}..{np.percentile(in_mask, 95):.1f} Hz")
