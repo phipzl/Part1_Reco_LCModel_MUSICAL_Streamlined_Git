@@ -14,6 +14,8 @@ nominal flip * B1 map * (reference amplitude of the scan / of the B1 map). No me
 in CSF; GM and WM share one molal concentration per voxel.
 """
 
+import json
+import os
 import re
 import struct
 
@@ -626,6 +628,11 @@ def inner_partitions(protocol, n_partitions, margin_mm):
 
 # B1 maps
 
+# An SA2RAGE "B1map" series: its value at the nominal flip and the transmitter reference
+# amplitude it is measured with, as the group's Part2 B1 correction
+SA2RAGE_B1_UNIT = 900.0
+SA2RAGE_REFERENCE_V = 270.0
+
 
 def frame_rescale(ds, i):
     """Rescale slope and intercept of frame i of an enhanced DICOM: its own functional group,
@@ -689,6 +696,39 @@ def siemens_b1_map(path):
             nominal_flip_deg=nominal,
             reference_amplitude_v=float(m.group(1)),
             convention="relative B1 = pixel / (10 x FlipAngle of the series)",
+        ),
+    )
+
+
+def sa2rage_b1_map(path):
+    """Relative B1 of an SA2RAGE "B1map" series (NIfTI): value / SA2RAGE_B1_UNIT, measured at
+    SA2RAGE_REFERENCE_V or at the TxRefAmp of a JSON beside it; also its affine and record."""
+    import nibabel as nib
+
+    image = nib.load(path)
+    volume = np.asarray(image.dataobj, float).reshape(image.shape[:3]) / SA2RAGE_B1_UNIT
+    # Background and low-signal voxels may fill most of the volume
+    if not 0.3 < np.percentile(volume, 90) < 3.0:
+        raise ValueError(
+            f"{path} is not an SA2RAGE B1map series in units of {SA2RAGE_B1_UNIT:g} per nominal flip"
+        )
+    reference, source = SA2RAGE_REFERENCE_V, "the SA2RAGE default"
+    sidecar = re.sub(r"\.nii(\.gz)?$", ".json", path)
+    if os.path.isfile(sidecar):
+        with open(sidecar) as f:
+            tx_ref_amp = json.load(f).get("TxRefAmp")
+        if tx_ref_amp:
+            reference, source = float(tx_ref_amp), f"TxRefAmp of {sidecar}"
+    return (
+        volume,
+        image.affine,
+        dict(
+            file=str(path),
+            unit=SA2RAGE_B1_UNIT,
+            reference_amplitude_v=reference,
+            reference_amplitude_source=source,
+            convention=f"relative B1 = B1map / {SA2RAGE_B1_UNIT:g} (SA2RAGE, as the group's "
+            "Part2 B1 correction)",
         ),
     )
 

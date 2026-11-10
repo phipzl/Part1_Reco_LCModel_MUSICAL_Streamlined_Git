@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scale the fitters' results to the water reference, outside the fitters (-w W3).
 
-    python water_scaling.py <tmp_dir> [--tissue GM,WM,CSF --b1 <flip angle map>]
+    python water_scaling.py <tmp_dir> [--tissue GM,WM,CSF --b1 <B1 map>]
 
 Per voxel c = C_fit * F / A_w: F the fitter's result, A_w the water amplitude at the
 water FID's first sample and C_fit the fitter's constant (fitter_calibration.py; PHIVE
@@ -44,6 +44,7 @@ DEEP_FITTERS = {"SpatialRegu": "gpufit", "PHIVE": "dlfit"}
 # The slab profile is not modelled: partitions centred closer than this to the VOI edge get
 # no mmol/kg.
 EDGE_MARGIN_MM = 15.0
+SA2RAGE_PREFIX = "sa2rage:"
 
 
 def fit_water(fid, dt, t0=0.0):
@@ -142,8 +143,11 @@ def recopar(combined):
 
 
 def load_b1(path):
-    """Relative B1, its affine and record: a Siemens flip angle map (DICOM), or a NIfTI of
-    relative B1 with a JSON beside it giving the reference amplitude it was measured with."""
+    """Relative B1, its affine and record: a Siemens flip angle map (DICOM), a NIfTI of
+    relative B1 with a JSON beside it giving the reference amplitude it was measured with,
+    or "sa2rage:<NIfTI>", the B1map series of an SA2RAGE (model.sa2rage_b1_map)."""
+    if path.startswith(SA2RAGE_PREFIX):
+        return model.sa2rage_b1_map(path[len(SA2RAGE_PREFIX) :])
     if not path.endswith((".nii", ".nii.gz")):
         return model.siemens_b1_map(path)
     sidecar = re.sub(r"\.nii(\.gz)?$", ".json", path)
@@ -538,7 +542,9 @@ if __name__ == "__main__":
         "--tissue", help="GM,WM,CSF partial volume NIfTIs (e.g. FAST pve_1,pve_2,pve_0)"
     )
     parser.add_argument(
-        "--b1", help="Siemens flip angle map (DICOM), or relative B1 NIfTI with a JSON"
+        "--b1",
+        help="Siemens flip angle map (DICOM), relative B1 NIfTI with a JSON, or "
+        "sa2rage:<B1map series NIfTI> (value 900 = nominal flip at 270 V)",
     )
     parser.add_argument(
         "--edge-margin-mm",

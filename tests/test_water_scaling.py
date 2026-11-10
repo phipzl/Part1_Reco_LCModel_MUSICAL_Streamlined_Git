@@ -146,6 +146,31 @@ class Inputs(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 water_scaling.load_tissue([paths[0], paths[1], paths[3]])
 
+    def test_sa2rage_b1(self):
+        import json
+
+        import nibabel as nib
+
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "B1map.nii.gz")
+            nib.save(nib.Nifti1Image(np.full((4, 5, 6), 720, np.int16), np.eye(4)), path)
+            b1, affine, record = water_scaling.load_b1("sa2rage:" + path)
+            np.testing.assert_allclose(b1, 0.8)
+            self.assertEqual((record["unit"], record["reference_amplitude_v"]), (900.0, 270.0))
+            # Without the prefix a NIfTI is relative B1 and needs its own JSON
+            with self.assertRaises(SystemExit):
+                water_scaling.load_b1(path)
+            with open(os.path.join(out, "B1map.json"), "w") as f:
+                json.dump({"TxRefAmp": 250}, f)
+            self.assertEqual(
+                water_scaling.load_b1("sa2rage:" + path)[2]["reference_amplitude_v"], 250.0
+            )
+            # A map of relative B1 is not in the SA2RAGE unit
+            relative = os.path.join(out, "relative.nii.gz")
+            nib.save(nib.Nifti1Image(np.full((4, 5, 6), 0.8, np.float32), np.eye(4)), relative)
+            with self.assertRaises(ValueError):
+                water_scaling.load_b1("sa2rage:" + relative)
+
     def test_water_psf(self):
         met = dict(
             matrix=[50, 50, 31],
