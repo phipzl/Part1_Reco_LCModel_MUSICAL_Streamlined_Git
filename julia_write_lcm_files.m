@@ -8,9 +8,8 @@ function julia_write_lcm_files(tmp_dir)
 %
 % The metadata is taken from Parameters.mat rather than from the Julia output, so
 % both routes describe the spectra with the same header values. The dwell time is
-% the exception: read_ascconv doubles alDwellTime for every rollercoaster sequence,
-% while the Julia reconstruction applies the readout oversampling factor the header
-% states, and its value is the one the spectra were sampled with.
+% the exception: the Julia reconstruction's value is the one the spectra were sampled
+% with, which MRSI.jl takes from the ADC dwell where the protocol states another.
 
 load([tmp_dir '/Parameters.mat'],'Par')
 
