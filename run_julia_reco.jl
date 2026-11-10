@@ -113,6 +113,13 @@ function combined_csi_contents(csi_data, dat_file, recon_kw, patref_override=not
         "nFreqEnc_FinalMatrix" => float(size(csi_data, 1)),   # after reconstruction, not the encoded size
     )
 
+    # MindGrab (-m mindgrab) needs the affine of the CSI grid. An MRSI.jl without
+    # slice_aligned_rotation pairs the in-plane axes the wrong way round.
+    if isdefined(MRSI, :slice_aligned_rotation)
+        contents["csi"]["RecoPar"]["PatientAffineLPS"] =
+            Matrix{Float64}(MRSI.build_patient_affine(scan_info; axis_convention=:lps))
+    end
+
     patref = isnothing(patref_override) ? uncombined_patref(scan_info, recon_kw) :
                                           as_uncombined_5d(patref_override)
     if isnothing(patref)

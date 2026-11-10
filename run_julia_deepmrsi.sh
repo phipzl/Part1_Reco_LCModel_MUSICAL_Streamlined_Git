@@ -379,12 +379,31 @@ run_julia_reconstruction() {
         return 0
     fi
 
+    run_mindgrab_mask
     run_field_and_lipid_steps
 
     if [[ -n $(deepmrsi_fitting) ]]; then
         return 0
     fi
     write_lcm_files_from_combined
+}
+
+# -m mindgrab: mask the reference scan the reconstruction left in CombinedCSI.mat,
+# then let create_mask.sh, which waited for it, read the result as a mask file.
+run_mindgrab_mask() {
+    [[ ${mindgrab_mask_flag:-0} -eq 1 ]] || return 0
+    local Python ScriptDir
+    Python=$(command -v python3 || command -v python)
+    [[ -n $Python ]] || matlab_step_failed "-m mindgrab (no python3 or python found)"
+    ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    echo -e "\nRun this command: $Python $ScriptDir/mindgrab_mask.py $abs_tmp_dir"
+    "$Python" "$ScriptDir/mindgrab_mask.py" "$abs_tmp_dir" || matlab_step_failed mindgrab_mask.py
+    $rawtomincp -float -clobber -like "$abs_tmp_dir/csi_template.mnc" \
+        -input "$abs_tmp_dir/mask_mindgrab.raw" "$mask_file" >/dev/null ||
+        matlab_step_failed "the MindGrab mask on the CSI grid"
+    (cd "$ScriptDir" && ./create_mask.sh)
+    [[ ! -f "$abs_tmp_dir/mask_user_failed" ]] ||
+        matlab_step_failed "the MindGrab mask, which holds no brain in the excited volume"
 }
 
 # The LCModel inputs, from CombinedCSI.mat as it stands after the steps above.
