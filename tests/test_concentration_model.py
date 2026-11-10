@@ -55,6 +55,28 @@ class Saturation(unittest.TestCase):
         self.assertAlmostEqual(ernst, np.arccos(np.exp(-0.45 / 1.3)), places=3)
 
 
+class ActualFlip(unittest.TestCase):
+    def test_each_scan_scales_by_its_own_reference_amplitude(self):
+        b1 = np.array([0.8, 1.0, 1.2])
+        met, water = protocol(0.46, 39, reference=246.7), protocol(0.26, 27, reference=295.0)
+        np.testing.assert_allclose(
+            model.actual_flip(met, b1, 270.0), np.deg2rad(39) * b1 * 246.7 / 270.0, rtol=1e-12
+        )
+        np.testing.assert_allclose(
+            model.actual_flip(water, b1, 270.0)
+            / model.actual_flip(dict(water, reference_amplitude_v=270.0), b1, 270.0),
+            295.0 / 270.0,
+            rtol=1e-12,
+        )
+        # The factors take the water scan's amplitude from its header, not the metabolite's
+        volume = np.array([[0.5], [0.4], [0.1]])
+        factors = [
+            model.correction_factors(volume, np.ones(1), met, w, 270.0, field="7T")["tNAA"][0]
+            for w in (water, dict(water, reference_amplitude_v=246.7))
+        ]
+        self.assertNotAlmostEqual(factors[0] / factors[1], 1.0, places=3)
+
+
 class MolalFactor(unittest.TestCase):
     content = {"GM": 0.78, "WM": 0.65, "CSF": 0.97}
 
