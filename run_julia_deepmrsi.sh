@@ -152,7 +152,52 @@ prepare_water_scaling() {
     export WaterScaling_flag=0
     [[ $(water_reference_method) == "W3" ]] || return 0
     export WaterScaling_flag=1
+    # "W3,<file>,b1=<map>,tissue=<GM>,<WM>,<CSF>": the maps water_scaling.py needs for mmol/kg
+    local Fields Field Key="" Tissue=()
+    IFS=, read -r -a Fields <<< "$WaterReference_MethodAndFile"
+    export WaterScaling_B1="" WaterScaling_Tissue=""
+    for Field in "${Fields[@]:2}"; do
+        case "$Field" in
+            b1=*)
+                Key=b1
+                WaterScaling_B1=$(water_scaling_input "${Field#b1=}") || matlab_step_failed "-w W3"
+                ;;
+            tissue=*)
+                Key=tissue
+                Tissue=("$(water_scaling_input "${Field#tissue=}")") || matlab_step_failed "-w W3"
+                ;;
+            *)
+                if [[ $Key != tissue ]]; then
+                    echo -e "\n-w W3: '$Field' is neither b1=<map> nor tissue=<GM>,<WM>,<CSF>."
+                    matlab_step_failed "-w W3"
+                fi
+                Tissue+=("$(water_scaling_input "$Field")") || matlab_step_failed "-w W3"
+                ;;
+        esac
+    done
+    if [[ -n $WaterScaling_B1 || ${#Tissue[@]} -gt 0 ]]; then
+        if [[ -z $WaterScaling_B1 || ${#Tissue[@]} -ne 3 ]]; then
+            echo -e "\n-w W3: mmol/kg needs both b1=<map> and tissue=<GM>,<WM>,<CSF> (three files)."
+            matlab_step_failed "-w W3"
+        fi
+        WaterScaling_Tissue=$(IFS=,; echo "${Tissue[*]}")
+    fi
+    [[ ${#Fields[@]} -gt 2 ]] && WaterReference_MethodAndFile="W3,${Fields[1]}"
     export WaterReference_MethodAndFile="W1,${WaterReference_MethodAndFile#*,}"
+}
+
+# An input file of -w W3 as an absolute path (relative ones are taken from the caller's
+# directory); a B1 map keeps its "sa2rage:" prefix. Fails when the file does not exist.
+# Argument $1: the file as given.
+water_scaling_input() {
+    local Prefix="" File=$1
+    [[ $File == sa2rage:* ]] && Prefix="sa2rage:" && File=${File#sa2rage:}
+    [[ $File == /* || -z ${calldir:-} ]] || File="$calldir/$File"
+    if [[ ! -f $File ]]; then
+        echo -e "\n-w W3: the file does not exist: $File" >&2
+        return 1
+    fi
+    echo "$Prefix$File"
 }
 
 # Both reconstructions write the W1 water into the LCModel controls; W3 fits without it.
@@ -168,8 +213,10 @@ run_water_scaling() {
     [[ -n $Python ]] || matlab_step_failed "the water scaling (no python3 or python found)"
     ScriptDir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     write_initial_parameters_json
-    echo -e "\nRun this command: $Python $ScriptDir/water_scaling.py $abs_tmp_dir"
-    "$Python" "$ScriptDir/water_scaling.py" "$abs_tmp_dir" || matlab_step_failed water_scaling.py
+    local Molal=()
+    [[ -n ${WaterScaling_B1:-} ]] && Molal=(--tissue "$WaterScaling_Tissue" --b1 "$WaterScaling_B1")
+    echo -e "\nRun this command: $Python $ScriptDir/water_scaling.py $abs_tmp_dir ${Molal[*]}"
+    "$Python" "$ScriptDir/water_scaling.py" "$abs_tmp_dir" "${Molal[@]}" || matlab_step_failed water_scaling.py
 }
 
 patref_is_the_alignment() {
