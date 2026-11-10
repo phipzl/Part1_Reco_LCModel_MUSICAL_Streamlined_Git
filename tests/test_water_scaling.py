@@ -157,6 +157,8 @@ class Inputs(unittest.TestCase):
             b1, affine, record = water_scaling.load_b1("sa2rage:" + path)
             np.testing.assert_allclose(b1, 0.8)
             self.assertEqual((record["unit"], record["reference_amplitude_v"]), (900.0, 270.0))
+            with self.assertRaises(ValueError):
+                water_scaling.load_b1("sa2rage:" + os.path.join(out, "B1map.json"))
             # Without the prefix a NIfTI is relative B1 and needs its own JSON
             with self.assertRaises(SystemExit):
                 water_scaling.load_b1(path)

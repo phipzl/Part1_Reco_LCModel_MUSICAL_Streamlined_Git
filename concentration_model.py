@@ -705,6 +705,8 @@ def sa2rage_b1_map(path):
     SA2RAGE_REFERENCE_V or at the TxRefAmp of a JSON beside it; also its affine and record."""
     import nibabel as nib
 
+    if not path.endswith((".nii", ".nii.gz")):
+        raise ValueError(f"{path} is not a NIfTI file")
     image = nib.load(path)
     volume = np.asarray(image.dataobj, float).reshape(image.shape[:3]) / SA2RAGE_B1_UNIT
     # Background and low-signal voxels may fill most of the volume
