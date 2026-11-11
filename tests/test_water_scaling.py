@@ -465,5 +465,62 @@ class RoundTrip(unittest.TestCase):
         self.assertEqual(calibration.deep_basis("gpufit", info, 288)[2], 1.06e-3)
 
 
+def stand_in_fitter(info, strict):
+    """A deep fitter that returns tCr 1 everywhere, for what fit_deep_synthetic records."""
+
+    def fit(data, mask):
+        grid = dict(
+            signal_length=data.shape[-1],
+            dwelltime_s=1e-3,
+            interval_bounds=[0],
+            reference_frequency_mhz=123.2,
+        )
+        return [np.ones(mask.shape)], ["tCr"], None, None, data, grid
+
+    return fit
+
+
+@unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
+class ResampledBasis(unittest.TestCase):
+    def test_spatialregu_a_p_off_its_dwell(self):
+        import contextlib
+
+        import torch
+
+        # Importing GPUFIT sets cuda:0 as torch's default; later tests must not inherit it
+        self.addCleanup(torch.set_default_device, torch.get_default_device())
+        from forD_gpu_fit import GPUFIT
+
+        if len(GPUFIT.BASIS_SETS["3T"]) < 3:
+            self.skipTest("this gpufit does not resample its basis")
+        cpu = contextlib.nullcontext() if torch.cuda.is_available() else torch.device("cpu")
+        point = calibration.operating_point("gpufit")
+        native = {"larmor_frequency": 123.246948e6, "dwelltime": 1.06e6, "gpufit_basis": "3T"}
+        off = dict(native, dwelltime=1.113e6)
+        with cpu, mock.patch("deep_crt_mrsi.deepmrsi._gpufit_fitter", stand_in_fitter):
+            # Resampling keeps the basis' scale: its first sample is the stored one
+            np.testing.assert_allclose(
+                np.abs(calibration.deep_basis("gpufit", off, 288)[0][0]),
+                np.abs(calibration.deep_basis("gpufit", native, 288)[0][0]),
+                rtol=1e-5,
+            )
+            records = [
+                calibration.fit_deep_synthetic(
+                    "gpufit",
+                    info,
+                    water_scaling.water_amplitude,
+                    300.0,
+                    288,
+                    point,
+                    sources=[LCMODEL_BASIS],
+                )[3]
+                for info in (native, off)
+            ]
+        self.assertAlmostEqual(records[1]["dwell_s"], 1.113e-3)
+        for record in records:
+            self.assertEqual(record["a_p_method"], "source basis")
+        self.assertAlmostEqual(records[1]["a_p"] / records[0]["a_p"], 1.0, delta=1e-4)
+
+
 if __name__ == "__main__":
     unittest.main()

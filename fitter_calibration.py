@@ -535,7 +535,8 @@ def fit_deep_synthetic(
         fire._check_field_matches_basis(info, True)
     fit = (fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter)(info, False)
     fids, names, dt, larmor_mhz, basis_path = deep_basis(fitter, info, n_points)
-    a_p, a_p_record = deep_a_p(fids, names, dt, larmor_mhz, source_candidates(sources))
+    # a_p is the basis' own and resampling keeps it, so it is found on the basis as stored
+    a_p, a_p_record = deep_a_p(*deep_basis(fitter, info)[:4], source_candidates(sources))
     present = truth(names, point["mix"])
     met = np.zeros(n_points, complex)
     for name, c in present.items():
