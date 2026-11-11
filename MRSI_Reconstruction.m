@@ -80,8 +80,9 @@ if(~FastPIReprocess_flag)
 	end
     
 
-    % The water weights are applied to the metabo scan's channels, so the water pass takes its coilcompressscan, number of coils and noise (if any), and its image if the water scan has none.
-    if(IsWatRef)
+    % The water weights are applied to the metabo scan's channels, so with coil compression the water pass takes its coilcompressscan, number of coils and noise (if any). Also its image or prescan if the water scan has none.
+    NoWatPrescan = ~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan));
+    if(IsWatRef && (NoWatPrescan || isempty(image) || ~isfield(image,'Data') || (isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils > 0 && csi.Par.coilcompression_to_numb_coils < csi.Par.total_channel_no_measured)))
         MetCSIPar = load([tmp_dir '/Parameters.mat']);
         Settis.OmitDataSets = {'ONLINE'};
         [MetCSI, image2, MetNoise,coilcompressscan] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
@@ -1656,11 +1657,12 @@ end
             display([ char(10) 'Load water reference' char(10)])
             load([Par.Paths.out_path '/WaterReference.mat' ],'WaterReferenceCSI')
             % Write_LCM_files indexes the water like the spectra, so it needs the array on the same grid and voxels.
-            Geom = @(P) [P.FoV_Read P.FoV_Phase P.FoV_Partition P.Pos_Sag P.Pos_Cor P.Pos_Tra];    % mm
-            SameOrient = all(cellfun(@(f) numel(WaterReferenceCSI.RecoPar.(f)) == numel(csi.RecoPar.(f)) && all(abs(WaterReferenceCSI.RecoPar.(f)(:) - csi.RecoPar.(f)(:)) < 1e-3), {'SliceNormalVector_x' 'SliceNormalVector_y' 'SliceNormalVector_z' 'InPlaneRotation'}));
-            if(~isequal(size(WaterReferenceCSI.Data,1:3), size(csi.Data,1:3)) || any(abs(Geom(WaterReferenceCSI.RecoPar) - Geom(csi.RecoPar)) > 0.1) || ~SameOrient)
-                error('W1 needs the water reference on the grid and voxels of the spectra: size %s vs %s, FoV and position %s vs %s mm, same orientation %d.', mat2str(size(WaterReferenceCSI.Data,1:3)), mat2str(size(csi.Data,1:3)), mat2str(Geom(WaterReferenceCSI.RecoPar),5), mat2str(Geom(csi.RecoPar),5), SameOrient);
+            WatGeo = WaterReferenceCSI.RecoPar; MetGeo = csi.RecoPar;
+            SameGeo = @(Fields,Tol) all(cellfun(@(f) numel(WatGeo.(f)) == numel(MetGeo.(f)) && all(abs(WatGeo.(f)(:) - MetGeo.(f)(:)) < Tol), Fields));
+            if(~isequal(size(WaterReferenceCSI.Data,1:3), size(csi.Data,1:3)) || ~SameGeo({'FoV_Read' 'FoV_Phase' 'FoV_Partition' 'Pos_Sag' 'Pos_Cor' 'Pos_Tra'},0.1) || ~SameGeo({'SliceNormalVector_x' 'SliceNormalVector_y' 'SliceNormalVector_z' 'InPlaneRotation'},1e-3))
+                error('W1 needs the water reference on the grid, FoV, position and orientation of the spectra (size %s vs %s).', mat2str(size(WaterReferenceCSI.Data,1:3)), mat2str(size(csi.Data,1:3)));
             end
+            clear WatGeo MetGeo SameGeo;
             Data.watref = WaterReferenceCSI.Data;
         end
 
