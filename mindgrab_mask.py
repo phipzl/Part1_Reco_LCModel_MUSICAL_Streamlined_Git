@@ -30,8 +30,9 @@ def load_patient_affine(combined):
     return affine if affine.shape == (4, 4) else None
 
 
-def mindgrab_brain_mask(reference, affine_lps):
-    """Boolean mask on the grid of reference (x, y, z, t, cha), by the online route's masking."""
+def mindgrab_brain_mask(reference, affine_lps, temp_dir):
+    """Boolean mask on the grid of reference (x, y, z, t, cha), by the online route's masking.
+    Its intermediate files go to temp_dir, the run's own: their names are fixed."""
     import deep_crt_mrsi.package_config as fire_conf
     from deep_crt_mrsi.bet_mask import bet_mask
     from deep_crt_mrsi.masking.affine import lps_to_ras
@@ -42,7 +43,7 @@ def mindgrab_brain_mask(reference, affine_lps):
         "mindgrab_model_dir": fire_conf.PACKAGE_CONFIG.mindgrab_model_dir,
         "makehomogeneous_sigma": fire_conf.PACKAGE_CONFIG.makehomogeneous_sigma,
     }
-    mask, _, _ = bet_mask(reference, info, affine=lps_to_ras(affine_lps))
+    mask, _, _ = bet_mask(reference, info, temp_dir=temp_dir, affine=lps_to_ras(affine_lps))
     return np.asarray(mask, dtype=bool)
 
 
@@ -65,7 +66,7 @@ def main(tmp_dir):
             "and a current MRSI.jl."
         )
 
-    mask = mindgrab_brain_mask(reference, affine_lps)
+    mask = mindgrab_brain_mask(reference, affine_lps, tmp_dir)
     print(f"mindgrab_mask: reference {reference.shape}, {int(mask.sum())} voxels in the mask")
     if not mask.any():
         sys.exit("ERROR: the MindGrab mask is empty.")

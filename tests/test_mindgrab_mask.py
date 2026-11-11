@@ -71,6 +71,7 @@ class MindgrabMaskFile(unittest.TestCase):
             mindgrab_mask.main(tmp_dir)
         self.assertEqual(masker.call_args[0][0].shape, GRID + (4, 2))
         np.testing.assert_array_equal(masker.call_args[0][1], AFFINE)
+        self.assertEqual(masker.call_args[0][2], tmp_dir)
         os.replace(
             os.path.join(tmp_dir, "mask_mindgrab.raw"), os.path.join(tmp_dir, "mask_brain.raw")
         )
@@ -99,9 +100,11 @@ class DeepCrtMrsiCalls(unittest.TestCase):
         reference = np.ones(GRID + (4, 1), dtype=np.complex64)
         mask = np.ones(GRID, dtype=bool)
         with mock.patch("deep_crt_mrsi.bet_mask.bet_mask", return_value=(mask, None, None)) as bet:
-            result = mindgrab_mask.mindgrab_brain_mask(reference, AFFINE)
+            result = mindgrab_mask.mindgrab_brain_mask(reference, AFFINE, "/run/tmp3")
         np.testing.assert_array_equal(result, mask)
         self.assertEqual(bet.call_args[0][1]["masking_method"], "mindgrab")
+        # Its intermediate files have fixed names, so never the shared system temp dir
+        self.assertEqual(bet.call_args[1]["temp_dir"], "/run/tmp3")
         ras = np.diag([-1.0, -1.0, 1.0, 1.0]) @ AFFINE
         np.testing.assert_array_equal(bet.call_args[1]["affine"], ras)
 
