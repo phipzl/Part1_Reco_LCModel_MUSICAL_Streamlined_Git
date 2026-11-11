@@ -232,7 +232,7 @@ def read_part1_raw(path):
 
 # Part1 masked the brain on the anatomical and cut the mask to the excited volume,
 # so the deep fitters fit the voxels LCModel fits. Without one, the reference scan
-# is masked the way the online route does it.
+# is masked with BET.
 mask = None
 if args.mask == "part1":
     for candidate in (os.path.join(maps_dir, "mask.raw"), os.path.join(tmp_dir, "mask_brain.raw")):
@@ -244,12 +244,16 @@ if args.mask == "part1":
                 break
 if mask is None:
     print("run_deepmrsi: no Part1 mask for this grid, masking the reference scan with BET")
+    info["masking_method"] = "bet"
     mask, _, _ = fire.bet_mask(patref, info)
 if not mask.any():
     print("run_deepmrsi: the mask is empty, fitting every voxel")
     mask[:] = True
 
-fid4 = fire.ensure_4d(fid) if fire.is_already_combined(fid) else fire.coil_combine(fid, patref)
+if not fire.is_already_combined(fid):
+    print(f"ERROR: the spectra are not coil combined, shape {fid.shape}", file=sys.stderr)
+    sys.exit(1)
+fid4 = fire.ensure_4d(fid)
 
 
 def write_map(folder, name, volume):
