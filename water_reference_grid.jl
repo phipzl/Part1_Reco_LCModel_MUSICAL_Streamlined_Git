@@ -201,7 +201,7 @@ function water_onto_metabolite_grid(water_scan, met_scan; n_points, channel_mixi
         gradient_delay_us = water_scan[:protocol_do_grad_delay_correction] ? MRSI.GRADIENT_DELAY_US : MRSI.NO_GRADIENT_DELAY_US
     end
     do_freq_cor = water_scan[:protocol_do_freq_offset_correction]
-    drift_mode = water_scan[:protocol_do_freq_drift_correction] ? :per_TI : nothing
+    drift_mode = water_scan[:protocol_do_freq_drift_correction] ? MRSI.FREQUENCY_DRIFT_DEFAULTS.correction : nothing
     prescan_kw = MRSI.handle_prescans(water_scan; frequency_drift_correction=drift_mode, channel_mixing_matrix)
     frequency_drift = get(prescan_kw, :frequency_drift, nothing)
 
