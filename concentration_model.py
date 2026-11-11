@@ -508,16 +508,20 @@ def group_of(name):
 
 
 def mrsi_kspace_weight(
-    shape, circles_per_partition=None, hamming=True, acquired=None, hamming_z=None
+    shape, circles_per_partition=None, hamming=True, acquired=None, hamming_z=None, window="hamming"
 ):
     """The k-space weighting of the CRT reconstruction on the Cartesian grid of `shape`
     (FFT order): the disk each partition's circles cover (circle i at radius (i - 1/2) / N,
-    its annulus to i / N), the in-plane Hamming of the radius (`hamming`) and the Hamming
+    its annulus to i / N), the in-plane `window` of the radius (`hamming`) and the Hamming
     along kz (`hamming_z`, default `hamming`), as MRSI.jl applies them in ICE mode.
+    `window`: "hamming", "hann" or "none"; Hann keeps Hamming along kz, "none" has no kz window.
     `acquired`: the matrix of a scan of the same FOV that was zero-filled or truncated onto
     `shape`; frequencies outside the grid are dropped."""
+    if window not in ("hamming", "hann", "none"):
+        raise ValueError(f"unknown k-space window {window!r}")
     acquired = tuple(acquired or shape)
     hamming_z = hamming if hamming_z is None else hamming_z
+    hamming_z = hamming_z and window != "none"
     nx, ny, nz = acquired
     n_circles = nx // 2
     if circles_per_partition is None:
@@ -534,7 +538,12 @@ def mrsi_kspace_weight(
     kx = np.fft.fftfreq(shape[0], 1 / shape[0]) / nx
     ky = np.fft.fftfreq(shape[1], 1 / shape[1]) / ny
     radius = np.sqrt(kx[:, None] ** 2 + ky[None, :] ** 2)
-    in_plane = 0.54 + 0.46 * np.cos(2 * np.pi * radius) if hamming else np.ones_like(radius)
+    if not hamming or window == "none":
+        in_plane = np.ones_like(radius)
+    elif window == "hann":
+        in_plane = np.where(radius < 0.5, 0.5 + 0.5 * np.cos(2 * np.pi * radius), 0)
+    else:
+        in_plane = 0.54 + 0.46 * np.cos(2 * np.pi * radius)
     z_window = (
         0.54 + 0.46 * np.cos(2 * np.pi * np.linspace(-0.5, 0.5, nz))
         if hamming_z and nz > 1

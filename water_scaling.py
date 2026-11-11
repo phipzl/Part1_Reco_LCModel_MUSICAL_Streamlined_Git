@@ -142,6 +142,14 @@ def recopar(combined):
     return dwell, larmor, points
 
 
+def kspace_window(combined):
+    """The reconstruction's k-space window: csi.RecoPar.KSpaceWindow of the Julia route, else
+    Hamming, MATLAB's."""
+    with h5py.File(combined, "r") as f:
+        value = f.get("csi/RecoPar/KSpaceWindow")
+        return "hamming" if value is None else "".join(map(chr, np.ravel(value[()])))
+
+
 def load_b1(path):
     """Relative B1, its affine and record: a Siemens flip angle map (DICOM), a NIfTI of
     relative B1 with a JSON beside it giving the reference amplitude it was measured with,
@@ -179,7 +187,7 @@ def load_tissue(paths):
     return pve, images[0].affine
 
 
-def water_psf(met, water, shape, hamming, route=None):
+def water_psf(met, water, shape, hamming, route=None, window="hamming"):
     """The water scan's k-space weight on the metabolite grid when it was zero-filled onto it
     (same FOV, matrix not larger), else None: the water was matched to the metabolite PSF.
     route "metabolite_grid" (water_route): reconstructed with the metabolite PSF, so None."""
@@ -196,7 +204,7 @@ def water_psf(met, water, shape, hamming, route=None):
     if not same_fov or any(a > n for a, n in zip(water["matrix"], shape)):
         return None
     return model.mrsi_kspace_weight(
-        shape, hamming=hamming, hamming_z=True, acquired=water["matrix"]
+        shape, hamming=hamming, hamming_z=True, acquired=water["matrix"], window=window
     )
 
 
@@ -211,22 +219,23 @@ def concentration_correction(
     min_brain=0.9,
     hamming=True,
     route=None,
+    window="hamming",
 ):
     """{group: factor} from institutional units to mmol/kg tissue water (concentration_model),
     the maps it rests on and its record. Voxels outside the inner partitions of the VOI, with
     less than min_brain brain tissue in the excited volume of either signal, or no B1, get 0.
     hamming: the reconstruction's in-plane Hamming (-h); MRSI.jl applies its kz window always.
-    route: the water pass's (water_route)."""
+    route: the water pass's (water_route). window: the k-space window of both reconstructions."""
     shape, csi_affine = template.shape[:3], template.affine
     met, water = model.read_protocol(met_file), model.read_protocol(water_file)
     pve, pve_affine = load_tissue(tissue)
     weight = model.mrsi_kspace_weight(
-        shape, hamming=hamming, hamming_z=True, acquired=met["matrix"]
+        shape, hamming=hamming, hamming_z=True, acquired=met["matrix"], window=window
     )
     amounts, brain, excited = model.tissue_on_grid(
         pve, pve_affine, csi_affine, shape, weight, model.voi_profile(met, shape[2])
     )
-    weight_water = water_psf(met, water, shape, hamming, route)
+    weight_water = water_psf(met, water, shape, hamming, route, window)
     if weight_water is None:
         amounts_water, brain_water = amounts, brain
     else:
@@ -293,9 +302,11 @@ def concentration_correction(
             "files": list(tissue),
             "order": "GM, WM, CSF",
             "grid": "partial volumes x the VOI box along the partitions, filtered with the "
-            "reconstruction's k-space weight (disk per partition, Hamming in-plane as -h, "
-            "Hamming in kz); fractions of the brain for the maps, amounts for the factors",
+            "reconstruction's k-space weight (disk per partition, its window in-plane as -h, "
+            "Hamming in kz unless none); fractions of the brain for the maps, amounts for the "
+            "factors",
             "hamming_in_plane": bool(hamming),
+            "kspace_window": window,
             "metabolite_acquired_matrix": met["matrix"],
             "water_psf": (
                 f"its own, acquired {water['matrix']} zero-filled onto {list(shape)}"
@@ -430,6 +441,7 @@ def main(tmp_dir, tissue=None, b1=None, edge_margin_mm=EDGE_MARGIN_MM):
             edge_margin_mm,
             hamming=par.get("hamming_flag", 0) == 1,
             route=water_route(out_path),
+            window=kspace_window(combined),
         )
         for name, volume in correction_maps.items():
             write_map(water_dir, f"{name}_map", volume, template)

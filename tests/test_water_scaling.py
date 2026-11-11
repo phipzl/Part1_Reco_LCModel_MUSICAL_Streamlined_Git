@@ -230,6 +230,22 @@ class Inputs(unittest.TestCase):
                     scipy.io.savemat(path, content)
                     self.assertEqual(water_scaling.water_route(out), expected)
 
+    def test_kspace_window(self):
+        import h5py
+
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "CombinedCSI.mat")
+            with h5py.File(path, "w") as f:
+                f.create_dataset("csi/RecoPar/Dwelltimes", data=[[360000.0]])
+            # MATLAB's reconstruction writes none: Hamming
+            self.assertEqual(water_scaling.kspace_window(path), "hamming")
+            with h5py.File(path, "a") as f:
+                f.create_dataset(
+                    "csi/RecoPar/KSpaceWindow",
+                    data=np.array([[ord(c)] for c in "hann"], np.uint16).T[..., None],
+                )
+            self.assertEqual(water_scaling.kspace_window(path), "hann")
+
     def test_single_slice_water(self):
         water = np.full((4, 4, 1, 32), 1 + 1j, np.complex64)
         for name, content in (

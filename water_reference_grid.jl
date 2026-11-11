@@ -66,12 +66,15 @@ struct MetaboliteGrid
     area::Vector{Float64}       # effective area of each metabolite circle
     radii::Vector{Float64}      # radius of each metabolite circle as acquired, normalised
     circles::Vector{Int}        # outermost circle of each metabolite partition
-    z_window::Bool
+    kspace_window::Symbol       # in-plane window, :hamming, :hann or :none
+    z_window::Bool              # Hamming along kz, also for :hann, as MRSI.jl's kernel
     fov_slice::Float64
     positions::Vector{Float64}  # metabolite partition centres, mm from the water slab centre
 end
 
-function MetaboliteGrid(met_info, water_info; offset_mm=slab_offset_mm(met_info, water_info))
+function MetaboliteGrid(met_info, water_info; offset_mm=slab_offset_mm(met_info, water_info),
+                        kspace_window=MRSI.default_kspace_window(met_info))
+    MRSI.check_kspace_window(kspace_window)
     n_part = met_info[:n_part]
     circles = zeros(Int, n_part)
     for c in MRSI.sort_into_circles(met_info, 1)
@@ -84,7 +87,8 @@ function MetaboliteGrid(met_info, water_info; offset_mm=slab_offset_mm(met_info,
     positions = ((1:n_part) .- centre) .* dz .- offset_mm
     return MetaboliteGrid(met_info[:n_frequency], n_part, MRSI.max_r(water_info) / MRSI.max_r(met_info),
                           MRSI.calculate_effective_area_per_circle(MRSI.get_radii(met_info; ice=true)),
-                          collect(float.(met_info[:radii])), circles, MRSI.applies_z_apodization(:ice, n_part), met_info[:fov_slice],
+                          collect(float.(met_info[:radii])), circles, kspace_window,
+                          kspace_window !== :none && MRSI.applies_z_apodization(:ice, n_part), met_info[:fov_slice],
                           collect(float.(positions)))
 end
 
@@ -162,7 +166,7 @@ metabolite's gain.
 function circle_onto_grid(kdata, c, grid::MetaboliteGrid; gradient_delay_us, do_hamming_filter=true)
     xy = MRSI.read_first_kspace_coordinate_normalized(c) * grid.k_scale
     dcf = grid.area[c[:circle]] * (abs(xy) / grid.radii[c[:circle]])^2 / c[:n_points_on_circle]
-    do_hamming_filter && (dcf *= MRSI.hamming_filter(abs(xy)))
+    do_hamming_filter && (dcf *= MRSI.kspace_window_filter(grid.kspace_window, abs(xy)))
     coordinates = MRSI.construct_circle_coordinates(xy, c[:n_points_on_circle],
                                                     MRSI.gradient_delay_to_rad(gradient_delay_us, c))
     dft = ComplexF32.(MRSI.calculate_dft_matrix(coordinates, grid.n_grid))
@@ -179,9 +183,9 @@ circle_kz(c) = (c[:part] - (c[:n_part] ÷ 2 + 1)) / c[:fov_slice]
 
 The uncombined water ONLINE scan of `water_scan` (MeasurementInfo) on the grid of `met_scan`,
 (nx, ny, nz, n_points, channels), reconstructed in ICE mode with the metabolite scan's point
-spread function. The frequency offset correction, the trajectory delays and the drift
-correction follow the water protocol as `reconstruct_like_ICE` reads them; `gradient_delay_us`
-overrides the delays as there.
+spread function, its k-space window included. The frequency offset correction, the
+trajectory delays and the drift correction follow the water protocol as
+`reconstruct_like_ICE` reads them; `gradient_delay_us` overrides the delays as there.
 """
 function water_onto_metabolite_grid(water_scan, met_scan; n_points, channel_mixing_matrix,
                                     do_hamming_filter=true, gradient_delay_us=nothing,

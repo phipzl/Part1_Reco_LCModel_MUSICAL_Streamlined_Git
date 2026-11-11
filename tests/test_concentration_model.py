@@ -235,6 +235,20 @@ class Grid(unittest.TestCase):
         self.assertEqual(int(truncated.any(axis=(0, 1)).sum()), self.shape[2])
         self.assertTrue(np.all(truncated <= 1))
 
+    def test_kspace_weight_protocol_windows(self):
+        hamming = model.mrsi_kspace_weight(self.shape)
+        hann = model.mrsi_kspace_weight(self.shape, window="hann")
+        none = model.mrsi_kspace_weight(self.shape, window="none")
+        # Hann in-plane, Hamming along kz as MRSI.jl's kernel
+        r = np.abs(np.fft.fftfreq(20)[3])
+        self.assertAlmostEqual(hann[3, 0, 0], 0.5 + 0.5 * np.cos(2 * np.pi * r))
+        self.assertAlmostEqual(hann[0, 0, 1], hamming[0, 0, 1])
+        # none: neither window
+        np.testing.assert_allclose(none[none > 0], 1)
+        np.testing.assert_array_equal(none > 0, hamming > 0)
+        with self.assertRaises(ValueError):
+            model.mrsi_kspace_weight(self.shape, window="tukey")
+
     def test_tissue_on_grid_segmentation_fov(self):
         # GM everywhere, but segmented only for x >= 0: the rest counts as no brain
         t1 = np.diag([1.0, 1.0, 1.0, 1.0])

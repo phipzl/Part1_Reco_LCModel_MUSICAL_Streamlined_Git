@@ -56,19 +56,19 @@ function circle_signal(c, shift)
     return reshape(ComplexF32.(data), :, 1, 1)
 end
 
-function metabolite_image(met)
+function metabolite_image(met; kspace_window=:hamming)
     image = zeros(ComplexF32, met[:n_frequency], met[:n_frequency], met[:n_part], 1, 1)
     for c in MRSI.sort_into_circles(met, 1)
         kdata = circle_signal(c, 0.0)
-        MRSI.density_compensation!(kdata, c; do_hamming_filter=true, do_hamming_filter_z=:ice, ice=true)
+        MRSI.density_compensation!(kdata, c; do_hamming_filter=true, do_hamming_filter_z=:ice, ice=true, kspace_window)
         image[:, :, c[:part], :, :] .+= MRSI.fourier_transform(kdata, c, NO_DELAY)
     end
     MRSI.fft_slice_dim!(image)
     return real.(image[:, :, :, 1, 1])
 end
 
-function water_image(met, water)
-    grid = MetaboliteGrid(met, water)
+function water_image(met, water; kspace_window=:hamming)
+    grid = MetaboliteGrid(met, water; kspace_window)
     circles = filter(c -> in_metabolite_extent(grid, c[:circle], circle_kz(c)), MRSI.sort_into_circles(water, 1))
     kz_list = sort(unique(circle_kz.(circles)))
     per_partition = zeros(ComplexF32, grid.n_grid, grid.n_grid, length(kz_list), 1, 1)
@@ -106,6 +106,18 @@ else
                 @test centroid(image, axis) ≈ centroid(reference, axis) atol = 0.02
             end
         end
+        # the protocol states no window here, so the grid takes MRSI.jl's default
+        @test MetaboliteGrid(met, slab_scan(16, 11, 55.0)).kspace_window === :hamming
+        # the water follows the metabolite reconstruction's k-space window
+        for kspace_window in (:hann, :none)
+            windowed = metabolite_image(met; kspace_window)
+            inside = windowed .> 0.97 * maximum(windowed)
+            image = water_image(met, slab_scan(16, 11, 55.0; offset=5.0); kspace_window)
+            ratio = image[inside] ./ windowed[inside]
+            @test median(ratio) ≈ 1 atol = 0.01
+            @test maximum(abs.(ratio .- 1)) < 0.03
+        end
+        @test_throws ArgumentError MetaboliteGrid(met, slab_scan(16, 11, 55.0); kspace_window=:tukey)
         # a water slab that does not cover the metabolite's kz extent cannot match it
         thin = slab_scan(16, 7, 55.0)
         @test_throws ErrorException water_onto_metabolite_grid(MRSI.MeasurementInfo(Dict(:ONLINE => thin)),

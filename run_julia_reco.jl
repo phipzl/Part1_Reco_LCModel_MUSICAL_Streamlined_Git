@@ -237,6 +237,8 @@ function combined_csi_contents(csi_data, dat_file, recon_kw, patref_override=not
         "FoV_Read" => float(online[:fov_readout]),
         "FoV_Partition" => float(online[:fov_slice]),
         "nFreqEnc_FinalMatrix" => float(size(csi_data, 1)),   # after reconstruction, not the encoded size
+        # water_scaling.py's tissue model takes the PSF from it
+        "KSpaceWindow" => String(get(recon_kw, :kspace_window, MRSI.default_kspace_window(scan_info))),
     )
 
     # MindGrab (-m mindgrab) needs the affine of the CSI grid. An MRSI.jl without
@@ -431,6 +433,8 @@ matlab_kw = (
     gradient_delay_us = something(gradient_delay_us, [0.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]),
     # op_ReconstructNonCartMRData.m's rotation of the FOV offset into the slice
     fov_shift_rotation = :matlab_legacy,
+    # MATLAB windows with Hamming whatever the protocol states
+    kspace_window = :hamming,
 )
 
 # -G, when it was given, applies in both modes. Left out otherwise so the ICE
@@ -453,8 +457,12 @@ recon_kw = parity_mode == "matlab" ? (; common_kw..., matlab_kw...) :
 # A water reference with another slab is reconstructed onto the metabolite grid here and
 # combined in the metabolite pass, with that scan's own weights.
 uncombined_path = joinpath(out_path, "WaterReferenceUncombined.mat")
+# The water pass takes the metabolite scan's k-space window, so both share one PSF.
+# The MATLAB mode has Hamming in matlab_kw.
+water_window_kw = (;)
 if is_water_ref
     met_scan, water_scan = MRSI.read_scan_info(met_file), MRSI.read_scan_info(dat_file)
+    parity_mode == "ice" && (water_window_kw = (; kspace_window = MRSI.default_kspace_window(met_scan)))
     if water_route(met_scan[:ONLINE], water_scan[:ONLINE]) === :metabolite_grid
         parity_mode == "ice" ||
             error("The water reference $dat_file has another slab than $met_file; that route " *
@@ -507,7 +515,7 @@ result = try
                                      combine_method=combine_method_of(dat_file)) : (;)
         # combine=true: Part1 takes coil-combined spectra only, whatever the protocol asks.
         reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., ice_kw..., water_kw...,
-                                         coil_weights, combine=true)
+                                         water_window_kw..., coil_weights, combine=true)
         # Keep the reference scan it already reconstructed: reconstruct_uncombined
         # would redo it through plain reconstruct, without the protocol gating, and
         # the field map would then come from a different reference than the data.
@@ -570,8 +578,8 @@ if is_water_ref
     println("Julia: storing the coil weights of FID point $MATLAB_REF_POINT")
     met_info, water_info = MRSI.read_scan_info(met_file), MRSI.read_scan_info(dat_file)
     # reconstruct_like_ICE sets ice and its own z window
-    gain_kw = parity_mode == "matlab" ? (; ice = false, matlab_kw.do_hamming_filter_z) :
-                                        (; ice = true, do_hamming_filter_z = :ice)
+    gain_kw = parity_mode == "matlab" ? (; ice = false, matlab_kw.do_hamming_filter_z, matlab_kw.kspace_window) :
+                                        (; ice = true, do_hamming_filter_z = :ice, water_window_kw...)
     gain_ratio = reconstruction_gain_ratio(met_info, water_info; gain_kw...)
     println("Julia: metabolite / water reconstruction gain $(round(gain_ratio; sigdigits=5)), " *
             "applied to the water signal")
