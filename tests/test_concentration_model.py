@@ -4,9 +4,11 @@
     python -m unittest discover -s tests
 
 The header tests on real data need MRSI_3T_HEADER_DIR, a folder with a 3T CRT metabolite and
-water dat pair and its Siemens B1 map (B1-Map-Siemens_18_MR/1.dcm); they are skipped without it.
+water dat pair (*_csi_*.dat, *_water_reference_*.dat) and its Siemens B1 map
+(B1-Map-Siemens_18_MR/1.dcm); they are skipped without it.
 """
 
+import glob
 import os
 import struct
 import sys
@@ -19,8 +21,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import concentration_model as model  # noqa: E402
 
 MRSI_3T_HEADER_DIR = os.environ.get("MRSI_3T_HEADER_DIR", "")
-MET_DAT = "meas_MID00049_FID24649_csi_ViennaDeepCRT_MRSI_50.dat"
-WATER_DAT = "meas_MID00050_FID24650_water_reference_36.dat"
+
+
+def header_dat(pattern):
+    """The first dat in MRSI_3T_HEADER_DIR matching pattern, else an empty string."""
+    found = (
+        sorted(glob.glob(os.path.join(MRSI_3T_HEADER_DIR, pattern))) if MRSI_3T_HEADER_DIR else []
+    )
+    return found[0] if found else ""
+
+
+MET_DAT = header_dat("*_csi_*.dat")
+WATER_DAT = header_dat("*_water_reference_*.dat")
 
 
 def protocol(tr, flip, te=1e-3, reference=263.0, b0=2.89362):
@@ -339,11 +351,11 @@ class Headers(unittest.TestCase):
         self.assertEqual(p["slab_normal"], [0.0, 0.0, 1.0])
 
     @unittest.skipUnless(
-        os.path.isfile(os.path.join(MRSI_3T_HEADER_DIR, MET_DAT)), "MRSI_3T_HEADER_DIR not set"
+        os.path.isfile(MET_DAT) and os.path.isfile(WATER_DAT), "MRSI_3T_HEADER_DIR not set"
     )
     def test_real_3t(self):
-        met = model.read_protocol(os.path.join(MRSI_3T_HEADER_DIR, MET_DAT))
-        water = model.read_protocol(os.path.join(MRSI_3T_HEADER_DIR, WATER_DAT))
+        met = model.read_protocol(MET_DAT)
+        water = model.read_protocol(WATER_DAT)
         for p, partitions, base in ((met, 31, 50), (water, 23, 36)):
             self.assertEqual(p["matrix"], [base, base, partitions])
             self.assertEqual(p["fov_mm"], [220.0, 220.0])
