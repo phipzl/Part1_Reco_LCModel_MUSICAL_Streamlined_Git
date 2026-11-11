@@ -142,7 +142,11 @@ def sidecar_time(nifti_path, frame_created):
     try:
         with open(sidecar) as f:
             meta = json.load(f)
-        time = datetime.time.fromisoformat(str(meta["AcquisitionTime"]).split(".")[0])
+        # The frame's creation time carries milliseconds, so the fraction counts here too
+        clock, _, fraction = str(meta["AcquisitionTime"]).partition(".")
+        time = datetime.time.fromisoformat(clock).replace(
+            microsecond=int((fraction + "000000")[:6])
+        )
         day = frame_created.date()
         if "AcquisitionDateTime" in meta:
             day = datetime.date.fromisoformat(str(meta["AcquisitionDateTime"])[:10])

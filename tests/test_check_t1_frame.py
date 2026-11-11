@@ -147,6 +147,18 @@ class FrameCheck(unittest.TestCase):
             self.assertTrue(report.startswith("T1 frame of reference not compared"), report)
             self.assertNotIn("\n", report)
 
+    def test_nifti_within_the_second_of_the_frame(self):
+        # LATE was created at 11:00:00.456
+        write_twix(self.dat, LATE)
+        for clock, warns in (
+            ("11:00:00.123", True),
+            ("11:00:00.456", False),
+            ("11:00:00.789", False),
+        ):
+            with self.subTest(clock=clock):
+                report = check.frame_report(self.nifti(AcquisitionTime=clock + "000"), self.dat)
+                self.assertEqual(report.startswith("\nWARNING: T1 acquired at"), warns, report)
+
     def test_errors_become_one_line_and_exit_zero(self):
         write_dicom(os.path.join(self.t1, "1.dcm"), "")
         cases = [(self.t1, self.path("missing.dat")), (self.t1, self.path("csi.mat"))]
