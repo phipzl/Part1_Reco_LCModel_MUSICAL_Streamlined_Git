@@ -505,8 +505,9 @@ result = try
         # for the reconstructed PATREFANDIMASCAN and it is not free.
         water_kw = is_water_ref ? (; ref_point_for_combine=MATLAB_REF_POINT,
                                      combine_method=combine_method_of(dat_file)) : (;)
+        # combine=true: Part1 takes coil-combined spectra only, whatever the protocol asks.
         reco = MRSI.reconstruct_like_ICE(dat_file; prescan=false, common_kw..., ice_kw..., water_kw...,
-                                         coil_weights)
+                                         coil_weights, combine=true)
         # Keep the reference scan it already reconstructed: reconstruct_uncombined
         # would redo it through plain reconstruct, without the protocol gating, and
         # the field map would then come from a different reference than the data.
