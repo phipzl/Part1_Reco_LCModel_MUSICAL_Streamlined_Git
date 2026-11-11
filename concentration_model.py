@@ -718,8 +718,11 @@ def sa2rage_b1_map(path):
         raise ValueError(f"{path} is not a NIfTI file")
     image = nib.load(path)
     volume = np.asarray(image.dataobj, float).reshape(image.shape[:3]) / SA2RAGE_B1_UNIT
-    # Background and low-signal voxels may fill most of the volume
-    if not 0.3 < np.percentile(volume, 90) < 3.0:
+    # The unit is checked on the voxels with a value; low-signal ones may still be most of them
+    support = volume[np.isfinite(volume) & (volume > 0)]
+    if support.size == 0:
+        raise ValueError(f"{path} has no voxel with a positive B1 value")
+    if not 0.3 < np.percentile(support, 90) < 3.0:
         raise ValueError(
             f"{path} is not an SA2RAGE B1map series in units of {SA2RAGE_B1_UNIT:g} per nominal flip"
         )

@@ -173,6 +173,23 @@ class Inputs(unittest.TestCase):
             with self.assertRaises(ValueError):
                 water_scaling.load_b1("sa2rage:" + relative)
 
+    def test_sa2rage_b1_unit_on_its_signal(self):
+        import nibabel as nib
+
+        sparse = np.zeros((10, 10, 10), np.float32)
+        sparse[:5, :1] = 720  # signal in 5% of the voxels
+        nan_background = np.where(sparse > 0, sparse, np.nan).astype(np.float32)
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "B1map.nii.gz")
+            for volume in (sparse, nan_background):
+                nib.save(nib.Nifti1Image(volume, np.eye(4)), path)
+                b1 = water_scaling.load_b1("sa2rage:" + path)[0]
+                np.testing.assert_allclose(b1[:5, :1], 0.8)
+            for empty in (np.zeros_like(sparse), np.full_like(sparse, np.nan)):
+                nib.save(nib.Nifti1Image(empty, np.eye(4)), path)
+                with self.assertRaisesRegex(ValueError, "no voxel with a positive B1"):
+                    water_scaling.load_b1("sa2rage:" + path)
+
     def test_water_psf(self):
         met = dict(
             matrix=[50, 50, 31],
