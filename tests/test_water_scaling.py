@@ -433,6 +433,21 @@ class RoundTrip(unittest.TestCase):
         self.assertAlmostEqual(inputs["frequency_offset"]["hz"], 10.0, delta=1.0)
         self.assertEqual(inputs["a_p_method"], "source basis")
 
+    @unittest.skipUnless(HAS_DEEP, "deep_crt_mrsi not installed")
+    def test_spatialregu_basis_off_its_dwell(self):
+        # 5% off the 3T basis dwell: gpu_fit fits a resampled basis, the synthetic is built on it
+        from forD_gpu_fit import GPUFIT
+
+        if len(GPUFIT.BASIS_SETS["3T"]) < 3:
+            self.skipTest("this gpufit does not resample its basis")
+        info = {"larmor_frequency": 123.246948e6, "dwelltime": 1.113e6, "gpufit_basis": "3T"}
+        fids, _, dwell, _, path = calibration.deep_basis("gpufit", info, 288)
+        self.assertAlmostEqual(dwell, 1.113e-3)
+        self.assertEqual(fids.shape[0], 288)
+        self.assertEqual(path, GPUFIT.BASIS_SETS["3T"][2])
+        info["dwelltime"] = 1.06e6
+        self.assertEqual(calibration.deep_basis("gpufit", info, 288)[2], 1.06e-3)
+
 
 if __name__ == "__main__":
     unittest.main()

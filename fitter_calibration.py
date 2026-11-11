@@ -352,46 +352,73 @@ def calibrate_lcmodel(control_path, lcmodel, workdir, water_fit, water_amplitude
 # Deep fitters
 
 
-def deep_basis(fitter, info):
+def deep_basis(fitter, info, n_points=None):
     """The basis FIDs as the fitter fits them, their names, the dwell time, the basis'
-    reference frequency (MHz) and the file."""
+    reference frequency (MHz) and the file. gpufit's is resampled onto the data dwell
+    (info, ns) as gpu_fit resamples it, when n_points is given."""
     from mrs_utils.basisset import Basisset
 
+    resampled = None
     if fitter == "gpufit":
         from forD_gpu_fit import GPUFIT
 
         # The run config as JSON: its parsed form allocates tensors on the fit device.
-        config_path, path = GPUFIT.BASIS_SETS[info["gpufit_basis"]]
+        entry = GPUFIT.BASIS_SETS[info["gpufit_basis"]]
+        config_path, path = entry[:2]
         with open(config_path) as f:
             config = json.load(f)
         io = config["io_config"]
         names, conjugate = io["metabolite_names"], config["preprocessor_config"]["conjugate_basis"]
         dwell, larmor_mhz, nucleus = io["dwelltime"], io["reference_frequency"], io["nucleus"]
+        acquired = float(info["dwelltime"]) * 1e-9 if info.get("dwelltime") else dwell
+        tolerance = getattr(GPUFIT, "_DWELLTIME_TOLERANCE", None)
+        if n_points and tolerance is not None and abs(acquired - dwell) > tolerance * dwell:
+            resampled, _ = GPUFIT._write_resampled_basis(
+                info["gpufit_basis"],
+                acquired,
+                int(n_points),
+                GPUFIT.basis_config(info["gpufit_basis"]),
+            )
+            path, dwell = entry[2], acquired
     else:
         from forD import DLFIT
 
         io, pre = DLFIT.config.io_config, DLFIT.config.preprocessor_config
         path, names, conjugate = str(DLFIT.basis_path), pre.basis_signal_names, pre.conjugate_basis
         dwell, larmor_mhz, nucleus = io.dwelltime, io.reference_frequency, io.nucleus
-    basis = Basisset.from_matlab(
-        path=path,
-        metabolite_names=names,
-        conjugate_basis=conjugate,
-        dwelltime=dwell,
-        reference_frequency=larmor_mhz,
-        nucleus=nucleus,
-    )
+    try:
+        basis = Basisset.from_matlab(
+            path=resampled or path,
+            metabolite_names=names,
+            conjugate_basis=conjugate,
+            dwelltime=dwell,
+            reference_frequency=larmor_mhz,
+            nucleus=nucleus,
+        )
+    finally:
+        if resampled:
+            os.remove(resampled)
     return np.asarray(basis.fids), list(basis.metabolite_names), float(dwell), larmor_mhz, path
 
 
 def source_candidates(extra=()):
-    """LCModel bases a deep basis may be made from: the given ones and those shipped with forD."""
+    """LCModel bases a deep basis may be made from: the given ones and those shipped with
+    forD and forD_gpu_fit."""
+    shipped = []
     try:
         from forD import DLFIT
 
-        shipped = sorted(glob.glob(os.path.join(os.path.dirname(str(DLFIT.basis_path)), "*.basis")))
+        shipped += sorted(
+            glob.glob(os.path.join(os.path.dirname(str(DLFIT.basis_path)), "*.basis"))
+        )
     except ImportError:
-        shipped = []
+        pass
+    try:
+        from forD_gpu_fit import GPUFIT
+
+        shipped += [entry[2] for entry in GPUFIT.BASIS_SETS.values() if len(entry) > 2]
+    except ImportError:
+        pass
     paths = [os.path.normpath(p) for p in (*extra, *shipped) if os.path.isfile(p)]
     return list(dict.fromkeys(paths))
 
@@ -507,7 +534,7 @@ def fit_deep_synthetic(
     if fitter == "dlfit":
         fire._check_field_matches_basis(info, True)
     fit = (fire._dlfit_fitter if fitter == "dlfit" else fire._gpufit_fitter)(info, False)
-    fids, names, dt, larmor_mhz, basis_path = deep_basis(fitter, info)
+    fids, names, dt, larmor_mhz, basis_path = deep_basis(fitter, info, n_points)
     a_p, a_p_record = deep_a_p(fids, names, dt, larmor_mhz, source_candidates(sources))
     present = truth(names, point["mix"])
     met = np.zeros(n_points, complex)
