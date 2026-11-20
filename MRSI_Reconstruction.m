@@ -94,20 +94,23 @@ if(~FastPIReprocess_flag)
 	end
     
 
-    % The water pass compresses and noise-decorrelates with the metabo scan's coilcompressscan, number of
-    % coils and noise: its coil weights are applied to the metabo scan's channels. If the water scan has
-    % no image, use the metabo scan's.
-    if(IsWatRef)
+    % The water weights are applied to the metabo scan's channels, so with coil compression the water pass takes its coilcompressscan, number of coils and noise (if any). Also its image or prescan if the water scan has none.
+    NoWatPrescan = ~isfield(coilcompressscan,'CoilCompScan') || isempty(coilcompressscan.CoilCompScan) || isempty(fieldnames(coilcompressscan.CoilCompScan));
+    if(IsWatRef && (NoWatPrescan || isempty(image) || ~isfield(image,'Data') || (isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils > 0 && csi.Par.coilcompression_to_numb_coils < csi.Par.total_channel_no_measured)))
         MetCSIPar = load([tmp_dir '/Parameters.mat']);
         Settis.OmitDataSets = {'ONLINE'};
-        [MetCSI, image2, NoiseData2,coilcompressscan] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
+        [MetCSI, image2, MetNoise,coilcompressscan] = io_ReadAndReshapeSiemensData(MetCSIPar.Par.Paths.csi_path(1),[],Settis);
+        if(MetCSI.Par.total_channel_no_measured ~= csi.Par.total_channel_no_measured)
+            error('-w needs water and metabo scans with the same receiver channels, not %d and %d. Run without -w or with matching acquisitions.', csi.Par.total_channel_no_measured, MetCSI.Par.total_channel_no_measured);
+        end
+        if(isfield(MetNoise,'Data')); NoiseData2 = MetNoise; end
         if(isfield(MetCSI.Par,'coilcompression_to_numb_coils'))
             csi.Par.coilcompression_to_numb_coils = MetCSI.Par.coilcompression_to_numb_coils;
         end
         if((isempty(image) || ~isfield(image,'Data')))
             image = image2;
         end
-        clear MetCSI image2;
+        clear MetCSI MetNoise image2;
     end
     % Also use the no of coilcompression from the Water-scan
     if(~IsWatRef && exist([Par.Paths.out_path '/WaterReference.mat' ],'file'))
@@ -116,11 +119,8 @@ if(~FastPIReprocess_flag)
             fprintf('\nWarning: Water and Metabo MRSI scans don''t have the same coil compression number.');
         end
         csi.Par.coilcompression_to_numb_coils = WaterData.WaterReferenceCSI.Par.coilcompression_to_numb_coils;
-        % And the compression basis the water weights are expressed in. It is the first metabo file's,
-        % which other averages would not reproduce with an SVD of their own.
-        if(isfield(WaterData,'V_cK'))
-            WaterV_cK = WaterData.V_cK;
-        end
+        % And the first metabo file's compression basis, in which the water weights are expressed.
+        if(Par.Flags.WaterReference_flag && isfield(WaterData,'V_cK')); WaterV_cK = WaterData.V_cK; end
         clear WaterData;
     end
     
@@ -392,16 +392,19 @@ end
 %% Do CoilCompression
 % csi.Par.coilcompression_to_numb_coils=3;
 
-if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') && isfield(coilcompressscan.CoilCompScan,'Data') && isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils<csi.Par.total_channel_no_measured && csi.Par.coilcompression_to_numb_coils>0)
+if((exist('WaterV_cK','var') || (exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') && isfield(coilcompressscan.CoilCompScan,'Data'))) && isfield(csi.Par,'coilcompression_to_numb_coils') && csi.Par.coilcompression_to_numb_coils<csi.Par.total_channel_no_measured && csi.Par.coilcompression_to_numb_coils>0)
     Text=sprintf('\n\n Do coil compression to %d virtual coils!',csi.Par.coilcompression_to_numb_coils);
     disp(Text)
 
+    K=csi.Par.coilcompression_to_numb_coils;
+    if(exist('WaterV_cK','var'))
+        V_cK = WaterV_cK;
+    else
     %set water data equals to image from iMUsical PRescan
-    for ii = 1:size(coilcompressscan.CoilCompScan.Data,2); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
+    for ii = 1:min(size(csi.Data,2),size(coilcompressscan.CoilCompScan.Data,2)); wuff.Data{ii} = reshape(coilcompressscan.CoilCompScan.Data{ii},[prod(size_MultiDims(coilcompressscan.CoilCompScan.Data{ii},1:5)) size(coilcompressscan.CoilCompScan.Data{ii},6)]); end
     water.Data = cat(1,wuff.Data{:});
     clear wuff
     
-    K=csi.Par.coilcompression_to_numb_coils;
     [rest NbCoil] = size(water.Data);
 
 %     fprintf('\n\nCoil compression: going from ',num2str(NbCoil),' to ',num2str(K),' coils.');
@@ -410,12 +413,9 @@ if(exist('coilcompressscan','var') && isfield(coilcompressscan,'CoilCompScan') &
      % Data_kc=permute(reshape(sqz(mrsiReconParams.SENSE),[NbCoil M*N]),[2 1]);
      % Data_kc=permute(reshape(sqz(sum(mrsiData_cast(:,:,:,1:mrsiReconParams.NbPtForWaterPhAmp),4)),[NbCoil NbAng*NbTilt]),[2 1]);
 
-     if(exist('WaterV_cK','var'))
-         V_cK = WaterV_cK;
-     else
-         [~,~,V_cK]=svd(water.Data,0);
-         V_cK=single(V_cK(:,1:K));
-     end
+     [~,~,V_cK]=svd(water.Data,0);
+     V_cK=single(V_cK(:,1:K));
+    end
 
       %Water data
 %      Temp=zeros([rest K],'single');
@@ -1321,7 +1321,7 @@ end
 
 %% Nuisance Removal
 
-if(Par.Flags.NuisRem_flag == 1 && contains(Par.Settings.NuisRem_Method,'HSVD','IgnoreCase',true))
+if(~IsWatRef && Par.Flags.NuisRem_flag == 1 && contains(Par.Settings.NuisRem_Method,'HSVD','IgnoreCase',true))
     run ./NuisanceRemoval_HSVD.m
 end
 
@@ -1652,9 +1652,7 @@ end
             if(exist('weights','var'))
                 save([Par.Paths.out_path '/WaterReference.mat' ],'weights','-append')
             end
-            if(exist('V_cK','var'))
-                save([Par.Paths.out_path '/WaterReference.mat' ],'V_cK','-append')
-            end
+            if(exist('V_cK','var')); save([Par.Paths.out_path '/WaterReference.mat' ],'V_cK','-append'); end
 
             % W2 --> Prepare appropriate LCModel processing
             if(strcmp(Par.Settings.WaterReference_method, 'W2'))
